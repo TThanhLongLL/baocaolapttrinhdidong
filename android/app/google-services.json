@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "769863226610",
+    "project_id": "baocao-32859",
+    "storage_bucket": "baocao-32859.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:769863226610:android:1fd4bce4edbb8fb438ec6b",
+        "android_client_info": {
+          "package_name": "com.example.baocaocuoiky"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0vsausJqfLccTo98UVrbIWSpinRlcOZ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
