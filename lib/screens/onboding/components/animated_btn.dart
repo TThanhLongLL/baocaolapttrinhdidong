@@ -22,7 +22,7 @@ class AnimatedBtn extends StatelessWidget {
         child: Stack(
           children: [
             RiveAnimation.asset(
-              "RiveAssets/button.riv",
+              "assets/RiveAssets/button.riv",
               controllers: [_btnAnimationController],
             ),
             Positioned.fill(

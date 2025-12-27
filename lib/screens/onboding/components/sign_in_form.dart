@@ -20,9 +20,18 @@ class SignInForm extends StatefulWidget {
 class _SignInFormState extends State<SignInForm> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _isSignUp = false; // false: đăng nhập, true: đăng ký
+  // Biến để lưu ảnh
+  // --- THÊM: Biến quản lý vai trò ---
+  String _selectedRole = 'student'; // Mặc định là học sinh
+  final List<Map<String, String>> _roles = [
+    {'value': 'student', 'label': 'Học sinh'},
+    {'value': 'teacher', 'label': 'Giáo viên'},
+    {'value': 'admin', 'label': 'Quản trị viên (Admin)'},
+  ];
+  // ---------------------------------
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool isShowLoading = false;
@@ -32,6 +41,7 @@ class _SignInFormState extends State<SignInForm> {
   late SMITrigger reset;
 
   late SMITrigger confetti;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -43,7 +53,7 @@ class _SignInFormState extends State<SignInForm> {
 
   void _onCheckRiveInit(Artboard artboard) {
     StateMachineController? controller =
-        StateMachineController.fromArtboard(artboard, 'State Machine 1');
+    StateMachineController.fromArtboard(artboard, 'State Machine 1');
 
     artboard.addController(controller!);
     error = controller.findInput<bool>('Error') as SMITrigger;
@@ -53,91 +63,140 @@ class _SignInFormState extends State<SignInForm> {
 
   void _onConfettiRiveInit(Artboard artboard) {
     StateMachineController? controller =
-        StateMachineController.fromArtboard(artboard, "State Machine 1");
+    StateMachineController.fromArtboard(artboard, "State Machine 1");
     artboard.addController(controller!);
 
     confetti = controller.findInput<bool>("Trigger explosion") as SMITrigger;
   }
-  Future<void> submit(BuildContext context) async {
-    setState(() {
-      isShowConfetti = true;
-      isShowLoading = true;
-    });
 
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (!_formKey.currentState!.validate()) {
-      setState(() {
-        isShowLoading = false;
-      });
-      error.fire();
-      Future.delayed(const Duration(seconds: 2), () => reset.fire());
-      return;
-    }
-
-    try {
-      final email = _emailCtrl.text.trim();
-      final pass  = _passCtrl.text.trim();
-
-      if (_isSignUp) {
-        final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: pass,
-        );
-
-        final uid = cred.user!.uid;
-        final fullName = _nameCtrl.text.trim();
-
-        // (Tuỳ chọn) lưu displayName trong Auth
-        await cred.user!.updateDisplayName(fullName);
-
-        // ✅ Lưu profile vào Firestore
-        await FirebaseFirestore.instance.collection('users').doc(uid).set({
-          'fullName': fullName,
-          'email': email,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: pass,
-        );
-      }
-
-      success.fire();
-      await Future.delayed(const Duration(seconds: 1));
-      confetti.fire();
-
-      await Future.delayed(const Duration(seconds: 1));
-      if (!context.mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const EntryPoint()),
-      );
-    } on FirebaseAuthException catch (e) {
-      error.fire();
-      if (!context.mounted) return;
-
-      final msg = switch (e.code) {
-        'email-already-in-use' => 'Email đã được dùng.',
-        'weak-password' => 'Mật khẩu quá yếu (thử >= 6 ký tự).',
-        'user-not-found' => 'Không tìm thấy tài khoản.',
-        'wrong-password' => 'Sai mật khẩu.',
-        'invalid-email' => 'Email không hợp lệ.',
-        _ => 'Lỗi đăng nhập/đăng ký: ${e.code}',
-      };
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    } finally {
-      if (mounted) {
-        setState(() => isShowLoading = false);
-      }
-      reset.fire();
-    }
+  // Hàm tạo accountId duy nhất
+  String _generateId(String prefix) {
+    return '${prefix}_${DateTime.now().millisecondsSinceEpoch}';
   }
 
+  Future<void> submit(BuildContext context) async {
+  setState(() {
+    isShowConfetti = true;
+    isShowLoading = true;
+  });
+
+  await Future.delayed(const Duration(seconds: 1));
+
+  if (!_formKey.currentState!.validate()) {
+    setState(() {
+      isShowLoading = false;
+    });
+    error.fire();
+    Future.delayed(const Duration(seconds: 2), () => reset.fire());
+    return;
+  }
+
+  try {
+    final email = _emailCtrl.text.trim();
+    final pass = _passCtrl.text.trim();
+
+    if (_isSignUp) {
+      // 1. Tạo tài khoản Auth
+      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: pass,
+      );
+
+      final uid = cred.user!.uid;
+      final fullName = _nameCtrl.text.trim();
+      final accountId = _generateId('ACC');
+
+      // Cập nhật tên hiển thị
+      await cred.user!.updateDisplayName(fullName);
 
 
+      String defaultAvatar = "https://ui-avatars.com/api/?name=$fullName&background=random&size=128";
+      // 2. Lưu vào bảng 'users'
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'fullName': fullName,
+        'email': email,
+        'accountId': accountId,
+        'role': _selectedRole,
+        'profileImage': defaultAvatar, 
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // 3. Tạo dữ liệu hồ sơ tương ứng
+      if (_selectedRole == 'student') {
+        // ✅ Tự động tạo hồ sơ học sinh
+        await FirebaseFirestore.instance.collection('students').add({
+          'hocSinhId': _generateId('HS'),
+          'fullName': fullName,
+          'email': email,
+          'maHocSinh': '', // Admin sẽ cập nhật sau
+          'accountId': accountId,
+          'ngaySinh': null,
+          'gioiTinh': null,
+          'className': null,
+          'lopId': null,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } else if (_selectedRole == 'teacher') {
+        // ✅ Tự động tạo hồ sơ giáo viên
+        await FirebaseFirestore.instance.collection('teachers').add({
+          'giaoVienId': _generateId('GV'),
+          'hoTen': fullName,
+          'email': email,
+          'maGiaoVien': '', // Admin sẽ cập nhật sau
+          'accountId': accountId,
+          'ngaySinh': null,
+          'gioiTinh': null,
+          'boMonId': null,
+          'lopDangDay': [],
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+      // Nếu là admin thì chỉ lưu trong users là đủ
+
+    } else {
+      // Đăng nhập
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: pass,
+      );
+    }
+
+    success.fire();
+    await Future.delayed(const Duration(seconds: 1));
+    confetti.fire();
+
+    await Future.delayed(const Duration(seconds: 1));
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EntryPoint()),
+    );
+  } on FirebaseAuthException catch (e) {
+    error.fire();
+    if (!context.mounted) return;
+
+    final msg = switch (e.code) {
+      'email-already-in-use' => 'Email đã được dùng.',
+      'weak-password' => 'Mật khẩu quá yếu (thử >= 6 ký tự).',
+      'user-not-found' => 'Không tìm thấy tài khoản.',
+      'wrong-password' => 'Sai mật khẩu.',
+      'invalid-email' => 'Email không hợp lệ.',
+      _ => 'Lỗi: ${e.message}',
+    };
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  } catch (e) {
+    error.fire();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi hệ thống: $e")));
+    }
+  } finally {
+    if (mounted) {
+      setState(() => isShowLoading = false);
+    }
+    reset.fire();
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +209,7 @@ class _SignInFormState extends State<SignInForm> {
             children: [
               if (_isSignUp) ...[
                 const Text(
-                  "Full name",
+                  "Full Name",
                   style: TextStyle(color: Colors.black54),
                 ),
                 Padding(
@@ -159,33 +218,58 @@ class _SignInFormState extends State<SignInForm> {
                     controller: _nameCtrl,
                     validator: (value) {
                       if (!_isSignUp) return null;
-                      if (value == null || value.trim().isEmpty) return "";
+                      if (value == null || value.trim().isEmpty) return "Vui lòng nhập tên";
                       return null;
                     },
                     textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
                       prefixIcon: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: SvgPicture.asset("icons/User_name.svg"),                      ),
+                        child: SvgPicture.asset("assets/icons/User_name.svg"),
+                      ),
                     ),
                   ),
                 ),
+
+                // --- THÊM: Dropdown chọn vai trò ---
+                const Text(
+                  "Vai trò đăng ký",
+                  style: TextStyle(color: Colors.black54),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 16),
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedRole,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.badge_outlined, color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                    items: _roles.map((role) {
+                      return DropdownMenuItem(
+                        value: role['value'],
+                        child: Text(role['label']!),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedRole = val!;
+                      });
+                    },
+                  ),
+                ),
+                // -----------------------------------
               ],
               const Text(
                 "Email",
-                style: TextStyle(
-                  color: Colors.black54,
-                ),
-
+                style: TextStyle(color: Colors.black54),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 16),
                 child: TextFormField(
-                  controller: _emailCtrl,  
+                  controller: _emailCtrl,
                   validator: (value) {
-                    if (value!.isEmpty) {
-                      return "";
-                    }
+                    if (value!.isEmpty) return "";
                     return null;
                   },
                   keyboardType: TextInputType.emailAddress,
@@ -193,32 +277,28 @@ class _SignInFormState extends State<SignInForm> {
                   decoration: InputDecoration(
                     prefixIcon: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: SvgPicture.asset("icons/email.svg"),
+                      child: SvgPicture.asset("assets/icons/email.svg"),
                     ),
                   ),
                 ),
               ),
               const Text(
                 "Password",
-                style: TextStyle(
-                  color: Colors.black54,
-                ),
+                style: TextStyle(color: Colors.black54),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 16),
                 child: TextFormField(
                   controller: _passCtrl,
                   obscureText: true,
-                  validator: (value) {            
-                    if (value!.isEmpty) {
-                      return "";
-                    }
+                  validator: (value) {
+                    if (value!.isEmpty) return "";
                     return null;
                   },
                   decoration: InputDecoration(
                     prefixIcon: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: SvgPicture.asset("icons/password.svg"),
+                      child: SvgPicture.asset("assets/icons/password.svg"),
                     ),
                   ),
                 ),
@@ -242,7 +322,7 @@ class _SignInFormState extends State<SignInForm> {
                     decoration: InputDecoration(
                       prefixIcon: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: SvgPicture.asset("icons/password.svg"),
+                        child: SvgPicture.asset("assets/icons/password.svg"),
                       ),
                     ),
                   ),
@@ -260,7 +340,6 @@ class _SignInFormState extends State<SignInForm> {
                       error.fire();
                       return;
                     }
-
                     submit(context);
                   },
                   style: ElevatedButton.styleFrom(
@@ -287,36 +366,38 @@ class _SignInFormState extends State<SignInForm> {
                   setState(() {
                     _isSignUp = !_isSignUp;
                     _confirmCtrl.clear();
+                    // Reset role về student khi chuyển chế độ
+                    _selectedRole = 'student';
                   });
                   widget.onModeChanged(_isSignUp);
                 },
-              child: Text(
-                      _isSignUp
-                          ? "Đã có tài khoản? Đăng nhập"
-                          : "Chưa có tài khoản? Đăng ký",
-                    ),             
-               ),
+                child: Text(
+                  _isSignUp
+                      ? "Đã có tài khoản? Đăng nhập"
+                      : "Chưa có tài khoản? Đăng ký",
+                ),
+              ),
             ],
           ),
         ),
         isShowLoading
             ? CustomPositioned(
-                child: RiveAnimation.asset(
-                  'RiveAssets/check.riv',
-                  fit: BoxFit.cover,
-                  onInit: _onCheckRiveInit,
-                ),
-              )
+          child: RiveAnimation.asset(
+            'assets/RiveAssets/check.riv',
+            fit: BoxFit.cover,
+            onInit: _onCheckRiveInit,
+          ),
+        )
             : const SizedBox(),
         isShowConfetti
             ? CustomPositioned(
-                scale: 6,
-                child: RiveAnimation.asset(
-                  "RiveAssets/confetti.riv",
-                  onInit: _onConfettiRiveInit,
-                  fit: BoxFit.cover,
-                ),
-              )
+          scale: 6,
+          child: RiveAnimation.asset(
+            "assets/RiveAssets/confetti.riv",
+            onInit: _onConfettiRiveInit,
+            fit: BoxFit.cover,
+          ),
+        )
             : const SizedBox(),
       ],
     );

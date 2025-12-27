@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'profile_theme.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'dart:typed_data';
 
-// ============================================================================
-// 3. PROFILE SCREEN (Màn hình chính)
-// ============================================================================
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
@@ -13,48 +18,75 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen>
     with TickerProviderStateMixin {
-
-  // Quản lý Animation
   late AnimationController animationController;
-
-  // List các Widget con (Header, Class, Calendar...)
   List<Widget> listViews = <Widget>[];
-
-  // Quản lý thanh cuộn và hiệu ứng mờ AppBar
   final ScrollController scrollController = ScrollController();
   double topBarOpacity = 0.0;
 
+  // Lưu dữ liệu user từ Firebase
+  String userName = "Đang tải...";
+  String userEmail = "Đang tải...";
+  String userAvatar = "https://ui-avatars.com/api/?name=User&background=random";
   @override
   void initState() {
     super.initState();
     animationController = AnimationController(
         duration: const Duration(milliseconds: 600), vsync: this);
 
+    _loadUserData(); // Tải dữ liệu từ Firebase
     addAllListData();
 
-    // Logic làm mờ AppBar khi cuộn
     scrollController.addListener(() {
       if (scrollController.offset >= 24) {
         if (topBarOpacity != 1.0) {
-          setState(() {
-            topBarOpacity = 1.0;
-          });
+          setState(() => topBarOpacity = 1.0);
         }
-      } else if (scrollController.offset <= 24 &&
-          scrollController.offset >= 0) {
+      } else if (scrollController.offset <= 24 && scrollController.offset >= 0) {
         if (topBarOpacity != scrollController.offset / 24) {
-          setState(() {
-            topBarOpacity = scrollController.offset / 24;
-          });
+          setState(() => topBarOpacity = scrollController.offset / 24);
         }
       } else if (scrollController.offset <= 0) {
         if (topBarOpacity != 0.0) {
-          setState(() {
-            topBarOpacity = 0.0;
-          });
+          setState(() => topBarOpacity = 0.0);
         }
       }
     });
+  }
+
+  // Tải dữ liệu user từ Firebase
+ Future<void> _loadUserData() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        if (doc.exists) {
+          final data = doc.data() as Map<String, dynamic>;
+          
+          // --- LOGIC XỬ LÝ ẢNH THÔNG MINH ---
+          String imgLink = data['profileImage'] ?? '';
+          String name = data['fullName'] ?? user.displayName ?? 'Người dùng';
+          
+          // Nếu link rỗng HOẶC là đường dẫn nội bộ (lỗi cũ) -> Dùng ảnh mặc định
+          if (imgLink.isEmpty || imgLink.startsWith('/data/user')) {
+             imgLink = 'https://ui-avatars.com/api/?name=$name&background=random&size=128';
+          }
+          // ----------------------------------
+
+          setState(() {
+            userName = name;
+            userEmail = data['email'] ?? user.email ?? 'Email';
+            userAvatar = imgLink;
+          });
+          addAllListData();
+        }
+      }
+    } catch (e) {
+      print("Lỗi tải dữ liệu: $e");
+    }
   }
 
   @override
@@ -67,20 +99,21 @@ class _ProfileScreenState extends State<ProfileScreen>
   void addAllListData() {
     const int count = 5;
 
-    // --- 1. Header Profile ---
+    listViews.clear();
     listViews.add(
       ProfileHeaderView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: animationController,
             curve: const Interval((1 / count) * 0, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: animationController,
-        onEditProfile: () {
-          _showEditOptions(context);
-        },
+        userName: userName,
+        userEmail: userEmail,
+        userAvatar: userAvatar,
+        onEditProfile: () => _showEditOptions(context),
+        onAvatarTap: () => _uploadAvatar(),
       ),
     );
 
-    // --- 2. Lớp Học ---
     listViews.add(
       ClassSubjectView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
@@ -91,7 +124,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
 
-    // --- 3. Tiêu đề Lịch ---
     listViews.add(
       Padding(
         padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 8),
@@ -103,7 +135,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
 
-    // --- 4. Lịch ---
     listViews.add(
       ScheduleCalendarView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
@@ -113,7 +144,99 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
   }
-// Hàm 1: Hiển thị lựa chọn (Menu)
+
+void _refreshProfileData() {
+  addAllListData();
+  setState(() {});
+}
+
+  // Upload ảnh lên cloud
+  Future<void> _uploadAvatar() async {
+    try {
+      final picker = ImagePicker();
+      // Dùng XFile (Chuẩn mới hỗ trợ cả Web và Mobile)
+      final XFile? pickedFile = await picker.pickImage(
+          source: ImageSource.gallery,
+          imageQuality: 80
+      );
+
+      if (pickedFile != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Đang tải ảnh lên Cloudinary...")),
+        );
+
+        // --- BƯỚC KHÁC BIỆT QUAN TRỌNG ---
+        // Thay vì lấy path (đường dẫn), ta đọc dữ liệu thành Bytes (dãy số)
+        // Cách này Web hay Mobile đều hiểu được.
+        Uint8List fileBytes = await pickedFile.readAsBytes();
+        String fileName = pickedFile.name;
+        // ---------------------------------
+
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          String cloudName = "dujejrg5i";
+          String uploadPreset = "bacao1";
+
+          var uri = Uri.parse("https://api.cloudinary.com/v1_1/$cloudName/image/upload");
+          var request = http.MultipartRequest("POST", uri);
+
+          request.fields['upload_preset'] = uploadPreset;
+
+          // SỬA: Dùng fromBytes thay vì fromPath
+          request.files.add(http.MultipartFile.fromBytes(
+              'file',
+              fileBytes,
+              filename: fileName // Cần đặt tên file ảo
+          ));
+
+
+          var response = await request.send();
+
+          if (response.statusCode == 200) {
+            var responseData = await response.stream.toBytes();
+            var responseString = String.fromCharCodes(responseData);
+            var jsonMap = jsonDecode(responseString);
+
+            final downloadUrl = jsonMap['secure_url'];
+
+            // Các bước lưu vào Firestore giữ nguyên
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .update({
+              'profileImage': downloadUrl,
+            });
+
+            await user.updatePhotoURL(downloadUrl);
+
+            setState(() {
+              userAvatar = downloadUrl;
+            });
+            addAllListData();
+
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Cập nhật thành công!"), backgroundColor: Colors.green),
+            );
+          } else {
+            print("File size: ${fileBytes.length}");
+            print("Upload preset: $uploadPreset");
+            print("Response body: ${await response.stream.bytesToString()}");
+            print("Lỗi Cloudinary: ${response.statusCode}");
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Lỗi upload: ${response.statusCode}"), backgroundColor: Colors.red),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print("Lỗi chi tiết: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Lỗi: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   void _showEditOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -127,16 +250,16 @@ class _ProfileScreenState extends State<ProfileScreen>
               leading: const Icon(Icons.person, color: AppTheme.nearlyDarkBlue),
               title: const Text("Đổi tên hiển thị"),
               onTap: () {
-                Navigator.pop(context); // Đóng menu lựa chọn
-                _showChangeNameDialog(context); // Mở dialog đổi tên
+                Navigator.pop(context);
+                _showChangeNameDialog(context);
               },
             ),
             ListTile(
               leading: const Icon(Icons.lock, color: AppTheme.nearlyDarkBlue),
               title: const Text("Đổi mật khẩu"),
               onTap: () {
-                Navigator.pop(context); // Đóng menu lựa chọn
-                _showChangePasswordDialog(context); // Mở dialog đổi mật khẩu
+                Navigator.pop(context);
+                _showChangePasswordDialog(context);
               },
             ),
             const SizedBox(height: 20),
@@ -146,14 +269,13 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // Hàm chung để tạo style cho ô nhập liệu (giúp code gọn hơn)
   InputDecoration _buildInputDecoration(String label, IconData icon, {String? errorText}) {
     return InputDecoration(
       labelText: label,
       errorText: errorText,
       prefixIcon: Icon(icon, color: AppTheme.nearlyDarkBlue.withOpacity(0.7)),
       filled: true,
-      fillColor: Colors.grey[100], // Màu nền xám nhạt sang trọng
+      fillColor: Colors.grey[100],
       contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -174,64 +296,75 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // --- Hàm 2: Dialog Đổi tên (Giao diện mới) ---
-  void _showChangeNameDialog(BuildContext context) {
-    TextEditingController nameController = TextEditingController();
+ void _showChangeNameDialog(BuildContext context) {
+  TextEditingController nameController = TextEditingController(text: userName);
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Bo góc dialog nhiều hơn
-          title: Row(
-            children: const [
-              Icon(Icons.edit_note, color: AppTheme.nearlyDarkBlue, size: 28),
-              SizedBox(width: 10),
-              Text("Đổi tên hiển thị", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Hãy nhập tên mới mà bạn muốn hiển thị trên hồ sơ.",
-                  style: TextStyle(color: Colors.grey, fontSize: 13)),
-              const SizedBox(height: 20),
-              TextField(
-                controller: nameController,
-                decoration: _buildInputDecoration("Tên mới", Icons.person),
-              ),
-            ],
-          ),
-          actionsPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              style: TextButton.styleFrom(foregroundColor: Colors.grey),
-              child: const Text("Hủy bỏ", style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                // TODO: Logic lưu tên Firebase
-                print("Tên mới: ${nameController.text}");
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.nearlyDarkBlue,
-                foregroundColor: Colors.white,
-                elevation: 4,
-                shadowColor: AppTheme.nearlyDarkBlue.withOpacity(0.5), // Đổ bóng màu xanh
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text("Cập nhật"),
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: const [
+            Icon(Icons.edit_note, color: AppTheme.nearlyDarkBlue, size: 28),
+            SizedBox(width: 10),
+            Text("Đổi tên hiển thị", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Hãy nhập tên mới mà bạn muốn hiển thị trên hồ sơ.",
+                style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 20),
+            TextField(
+              controller: nameController,
+              decoration: _buildInputDecoration("Tên mới", Icons.person),
             ),
           ],
-        );
-      },
-    );
-  }
+        ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey),
+            child: const Text("Hủy bỏ", style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final user = FirebaseAuth.instance.currentUser;
+              if (user != null && nameController.text.isNotEmpty) {
+                // Lưu vào fullName (field đúng trong Firebase)
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .set({
+                      'fullName': nameController.text,  // Field đúng!
+                    }, SetOptions(merge: true));
 
-  // --- Hàm 3: Dialog Đổi mật khẩu (Giao diện mới) ---
+                setState(() => userName = nameController.text);
+                addAllListData(); // Refresh lại listViews
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Cập nhật tên thành công!"), backgroundColor: Colors.green),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.nearlyDarkBlue,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text("Cập nhật"),
+          ),
+        ],
+      );
+    },
+  );
+}
+
   void _showChangePasswordDialog(BuildContext context) {
     final TextEditingController passController = TextEditingController();
     final TextEditingController confirmPassController = TextEditingController();
@@ -258,26 +391,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                   const Text("Nhập mật khẩu mới để bảo vệ tài khoản.",
                       style: TextStyle(color: Colors.grey, fontSize: 13)),
                   const SizedBox(height: 20),
-                  
-                  // Ô nhập mật khẩu mới
                   TextField(
                     controller: passController,
                     decoration: _buildInputDecoration("Mật khẩu mới", Icons.vpn_key),
                     obscureText: true,
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Ô nhập lại mật khẩu
                   TextField(
                     controller: confirmPassController,
                     decoration: _buildInputDecoration(
-                      "Xác nhận mật khẩu", 
-                      Icons.check_circle_outline, 
+                      "Xác nhận mật khẩu",
+                      Icons.check_circle_outline,
                       errorText: errorText
                     ),
                     obscureText: true,
                     onChanged: (value) {
-                      // Tự động xóa lỗi khi người dùng gõ lại
                       if (errorText != null) {
                         setStateDialog(() => errorText = null);
                       }
@@ -293,7 +421,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: const Text("Hủy bỏ", style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
                 ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (passController.text != confirmPassController.text) {
                       setStateDialog(() {
                         errorText = "Mật khẩu xác nhận không khớp!";
@@ -303,24 +431,27 @@ class _ProfileScreenState extends State<ProfileScreen>
                         errorText = "Vui lòng nhập mật khẩu!";
                       });
                     } else {
-                      // TODO: Logic đổi mật khẩu Firebase
-                      print("Pass mới: ${passController.text}");
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Text("Đổi mật khẩu thành công!"),
-                          backgroundColor: Colors.green,
-                          behavior: SnackBarBehavior.floating, // Thông báo nổi đẹp hơn
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      );
+                      try {
+                        await FirebaseAuth.instance.currentUser
+                            ?.updatePassword(passController.text);
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Đổi mật khẩu thành công!"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } catch (e) {
+                        setStateDialog(() {
+                          errorText = "Lỗi: ${e.toString()}";
+                        });
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.nearlyDarkBlue,
                     foregroundColor: Colors.white,
                     elevation: 4,
-                    shadowColor: AppTheme.nearlyDarkBlue.withOpacity(0.5),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
@@ -333,6 +464,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       },
     );
   }
+
   Future<bool> getData() async {
     await Future<dynamic>.delayed(const Duration(milliseconds: 50));
     return true;
@@ -348,9 +480,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           children: <Widget>[
             getMainListViewUI(),
             getAppBarUI(),
-            SizedBox(
-              height: MediaQuery.of(context).padding.bottom,
-            )
+            SizedBox(height: MediaQuery.of(context).padding.bottom)
           ],
         ),
       ),
@@ -384,7 +514,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // Thanh App Bar (Top Bar)
   Widget getAppBarUI() {
     return Column(
       children: <Widget>[
@@ -399,17 +528,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ),
                 boxShadow: <BoxShadow>[
                   BoxShadow(
-                      color: AppTheme.grey
-                          .withOpacity(0.4 * topBarOpacity),
+                      color: AppTheme.grey.withOpacity(0.4 * topBarOpacity),
                       offset: const Offset(1.1, 1.1),
                       blurRadius: 10.0),
                 ],
               ),
               child: Column(
                 children: <Widget>[
-                  SizedBox(
-                    height: MediaQuery.of(context).padding.top,
-                  ),
+                  SizedBox(height: MediaQuery.of(context).padding.top),
                   Padding(
                     padding: EdgeInsets.only(
                         left: 16,
@@ -431,7 +557,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                           ),
                         ),
-                        // Nút Back giả lập
                         SizedBox(
                           height: 38,
                           width: 38,
@@ -461,22 +586,26 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 }
 
-// ============================================================================
-// 4. CUSTOM WIDGETS
-// ============================================================================
-
-// --- WIDGET 1: PROFILE HEADER ---
+// --- PROFILE HEADER WIDGET (Sửa để hiển thị dữ liệu động) ---
 class ProfileHeaderView extends StatelessWidget {
   final AnimationController animationController;
   final Animation<double> animation;
   final VoidCallback onEditProfile;
+  final VoidCallback onAvatarTap;
+  final String userName;
+  final String userEmail;
+  final String userAvatar;
 
-  const ProfileHeaderView(
-      {Key? key,
-        required this.animationController,
-        required this.animation,
-        required this.onEditProfile})
-      : super(key: key);
+  const ProfileHeaderView({
+    Key? key,
+    required this.animationController,
+    required this.animation,
+    required this.onEditProfile,
+    required this.onAvatarTap,
+    required this.userName,
+    required this.userEmail,
+    required this.userAvatar,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -489,8 +618,7 @@ class ProfileHeaderView extends StatelessWidget {
             transform: Matrix4.translationValues(
                 0.0, 30 * (1.0 - animation.value), 0.0),
             child: Padding(
-              padding: const EdgeInsets.only(
-                  left: 24, right: 24, top: 16, bottom: 18),
+              padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 18),
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.white,
@@ -504,26 +632,31 @@ class ProfileHeaderView extends StatelessWidget {
                 ),
                 child: Column(
                   children: <Widget>[
-                    // Avatar & Camera Icon
                     Padding(
                       padding: const EdgeInsets.only(top: 24.0),
                       child: Stack(
                         alignment: Alignment.bottomRight,
                         children: [
-                          Container(
-                            width: 110,
-                            height: 110,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                    color: AppTheme.grey.withOpacity(0.3),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 5))
-                              ],
-                              image: const DecorationImage(
-                                image: NetworkImage("https://i.pravatar.cc/300"), // Ảnh mẫu
-                                fit: BoxFit.cover,
+                          GestureDetector(
+                            onTap: onAvatarTap,
+                            child: Container(
+                              width: 110,
+                              height: 110,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: AppTheme.grey.withOpacity(0.3),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 5))
+                                ],
+                                image: DecorationImage(
+                                  image: NetworkImage(userAvatar),
+                                  fit: BoxFit.cover,
+                                  onError: (exception, stackTrace) {
+                                    // Fallback nếu ảnh không load
+                                  },
+                                ),
                               ),
                             ),
                           ),
@@ -541,22 +674,21 @@ class ProfileHeaderView extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      "Tran Thanh Long",
-                      style: TextStyle(
+                    Text(
+                      userName,
+                      style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 22,
                           color: AppTheme.darkerText),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      "ttlonga03@gmai.com",
-                      style: TextStyle(
+                    Text(
+                      userEmail,
+                      style: const TextStyle(
                           fontSize: 14,
                           color: AppTheme.grey),
                     ),
                     const SizedBox(height: 20),
-                    // Button Chỉnh sửa
                     Padding(
                       padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24),
                       child: SizedBox(
@@ -565,8 +697,8 @@ class ProfileHeaderView extends StatelessWidget {
                         child: OutlinedButton.icon(
                           onPressed: onEditProfile,
                           icon: const Icon(Icons.edit, size: 18, color: AppTheme.nearlyDarkBlue),
-                          label: const Text("Chỉnh sửa thông tin cá nhân", 
-                          style: TextStyle(color: AppTheme.nearlyDarkBlue, fontWeight: FontWeight.bold)),
+                          label: const Text("Chỉnh sửa thông tin cá nhân",
+                              style: TextStyle(color: AppTheme.nearlyDarkBlue, fontWeight: FontWeight.bold)),
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: AppTheme.nearlyDarkBlue, width: 1.5),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -585,18 +717,18 @@ class ProfileHeaderView extends StatelessWidget {
   }
 }
 
-// --- WIDGET 2: CLASS SUBJECT ---
+// ClassSubjectView & ScheduleCalendarView giữ nguyên như cũ...
 class ClassSubjectView extends StatefulWidget {
   final AnimationController animationController;
   final Animation<double> animation;
   final String className;
 
-  const ClassSubjectView(
-      {Key? key,
-        required this.animationController,
-        required this.animation,
-        required this.className})
-      : super(key: key);
+  const ClassSubjectView({
+    Key? key,
+    required this.animationController,
+    required this.animation,
+    required this.className,
+  }) : super(key: key);
 
   @override
   State<ClassSubjectView> createState() => _ClassSubjectViewState();
@@ -632,9 +764,7 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
                   children: <Widget>[
                     InkWell(
                       onTap: () {
-                        setState(() {
-                          isExpanded = !isExpanded;
-                        });
+                        setState(() => isExpanded = !isExpanded);
                       },
                       borderRadius: BorderRadius.circular(16),
                       child: Padding(
@@ -658,18 +788,14 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
                                   Text(
                                     widget.className,
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                      color: AppTheme.darkerText,
-                                    ),
+                                        color: AppTheme.darkerText,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16),
                                   ),
                                   const SizedBox(height: 4),
-                                  Text(
-                                    isExpanded ? "Nhấn để thu gọn" : "Nhấn để xem bài tập (3 mới)",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isExpanded ? AppTheme.nearlyBlue : AppTheme.grey,
-                                    ),
+                                  const Text(
+                                    "Xem chi tiết lớp học",
+                                    style: TextStyle(color: AppTheme.grey, fontSize: 12),
                                   ),
                                 ],
                               ),
@@ -680,7 +806,6 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
                         ),
                       ),
                     ),
-                    // Danh sách bài tập
                     AnimatedCrossFade(
                       firstChild: Container(),
                       secondChild: Padding(
@@ -738,14 +863,15 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
   }
 }
 
-// --- WIDGET 3: SCHEDULE CALENDAR ---
 class ScheduleCalendarView extends StatelessWidget {
   final AnimationController animationController;
   final Animation<double> animation;
 
-  const ScheduleCalendarView(
-      {Key? key, required this.animationController, required this.animation})
-      : super(key: key);
+  const ScheduleCalendarView({
+    Key? key,
+    required this.animationController,
+    required this.animation,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -758,8 +884,7 @@ class ScheduleCalendarView extends StatelessWidget {
             transform: Matrix4.translationValues(
                 0.0, 30 * (1.0 - animation.value), 0.0),
             child: Padding(
-              padding: const EdgeInsets.only(
-                  left: 24, right: 24, top: 16, bottom: 32),
+              padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 32),
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.white,
@@ -790,7 +915,6 @@ class ScheduleCalendarView extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 20),
-                      // Thứ trong tuần
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: ["T2","T3","T4","T5","T6","T7","CN"].map((e) =>
@@ -798,7 +922,6 @@ class ScheduleCalendarView extends StatelessWidget {
                         ).toList(),
                       ),
                       const SizedBox(height: 10),
-                      // Grid lịch
                       GridView.builder(
                         padding: EdgeInsets.zero,
                         shrinkWrap: true,
@@ -807,13 +930,12 @@ class ScheduleCalendarView extends StatelessWidget {
                           crossAxisCount: 7,
                           childAspectRatio: 1,
                         ),
-                        itemCount: 31, // Giả lập 31 ngày
+                        itemCount: 31,
                         itemBuilder: (context, index) {
                           int day = index + 1;
-                          // Giả lập logic tô màu
                           bool isSchoolDay = (day == 15 || day == 20 || day == 22);
                           bool isDeadline = (day == 25 || day == 28);
-                          bool isToday = (day == 18); // Giả sử hôm nay là 18
+                          bool isToday = (day == 18);
 
                           Color bgColor = Colors.transparent;
                           Color textColor = AppTheme.darkerText;
@@ -842,6 +964,7 @@ class ScheduleCalendarView extends StatelessWidget {
                                 "$day",
                                 style: TextStyle(
                                     color: textColor,
+                                    fontSize: 13,
                                     fontWeight: (isSchoolDay || isDeadline || isToday) ? FontWeight.bold : FontWeight.normal
                                 ),
                               ),
@@ -850,7 +973,6 @@ class ScheduleCalendarView extends StatelessWidget {
                         },
                       ),
                       const SizedBox(height: 20),
-                      // Chú thích
                       Container(
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                         decoration: BoxDecoration(

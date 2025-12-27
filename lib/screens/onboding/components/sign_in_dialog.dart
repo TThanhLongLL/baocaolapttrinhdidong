@@ -106,7 +106,7 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
                             onPressed: () {},
                             padding: EdgeInsets.zero,
                             icon: SvgPicture.asset(
-                              "icons/email_box.svg",
+                              "assets/icons/email_box.svg",
                               height: 64,
                               width: 64,
                             ),
@@ -115,7 +115,7 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
                             onPressed: () {},
                             padding: EdgeInsets.zero,
                             icon: SvgPicture.asset(
-                              "icons/apple_box.svg",
+                              "assets/icons/apple_box.svg",
                               height: 64,
                               width: 64,
                             ),
@@ -124,7 +124,7 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
                             onPressed: () {},
                             padding: EdgeInsets.zero,
                             icon: SvgPicture.asset(
-                              "icons/google_box.svg",
+                              "assets/icons/google_box.svg",
                               height: 64,
                               width: 64,
                             ),

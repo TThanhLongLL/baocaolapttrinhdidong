@@ -1,24 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:baocaocuoiky/screens/onboding/onboding_screen.dart';
-import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart'; // nếu bạn dùng FlutterFire CLI
 import 'package:baocaocuoiky/screens/onboding/onboding_screen.dart';
 import 'package:baocaocuoiky/screens/chat/chat_screen.dart';
+import 'firebase_options.dart';
 
-
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+
+  // Dùng try-catch để bao bọc việc khởi tạo Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    print("Khởi tạo Firebase thành công!");
+  } catch (e) {
+    // Nếu có lỗi (ví dụ: đã khởi tạo rồi), chỉ in ra và BỎ QUA để app chạy tiếp
+    print("Lỗi khởi tạo Firebase (có thể bỏ qua): $e");
+  }
+
+  // Quan trọng nhất: Dòng này PHẢI được chạy thì mới hết màn hình trắng
   runApp(const MyApp());
 }
+
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(

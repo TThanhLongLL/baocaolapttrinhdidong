@@ -46,7 +46,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '769863226610',
     projectId: 'baocao-32859',
     authDomain: 'baocao-32859.firebaseapp.com',
-    storageBucket: 'baocao-32859.firebasestorage.app',
+    // Bucket name phải là <project-id>.appspot.com, không phải domain firebasestorage.app
+    storageBucket: 'baocao-32859.appspot.com',
     measurementId: 'G-D6GM2JDKC5',
   );
 
@@ -55,7 +56,7 @@ class DefaultFirebaseOptions {
     appId: '1:769863226610:android:1fd4bce4edbb8fb438ec6b',
     messagingSenderId: '769863226610',
     projectId: 'baocao-32859',
-    storageBucket: 'baocao-32859.firebasestorage.app',
+    storageBucket: 'baocao-32859.appspot.com',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -63,7 +64,7 @@ class DefaultFirebaseOptions {
     appId: '1:769863226610:ios:11fb8cea87d184a938ec6b',
     messagingSenderId: '769863226610',
     projectId: 'baocao-32859',
-    storageBucket: 'baocao-32859.firebasestorage.app',
+    storageBucket: 'baocao-32859.appspot.com',
     iosBundleId: 'com.example.baocaocuoiky',
   );
 
@@ -72,7 +73,7 @@ class DefaultFirebaseOptions {
     appId: '1:769863226610:ios:11fb8cea87d184a938ec6b',
     messagingSenderId: '769863226610',
     projectId: 'baocao-32859',
-    storageBucket: 'baocao-32859.firebasestorage.app',
+    storageBucket: 'baocao-32859.appspot.com',
     iosBundleId: 'com.example.baocaocuoiky',
   );
 
@@ -82,7 +83,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '769863226610',
     projectId: 'baocao-32859',
     authDomain: 'baocao-32859.firebaseapp.com',
-    storageBucket: 'baocao-32859.firebasestorage.app',
+    storageBucket: 'baocao-32859.appspot.com',
     measurementId: 'G-P6422BFT7F',
   );
 }

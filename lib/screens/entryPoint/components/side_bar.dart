@@ -65,71 +65,75 @@ class _SideBarState extends State<SideBar> {
         ),
         child: DefaultTextStyle(
           style: const TextStyle(color: Colors.white),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(FirebaseAuth.instance.currentUser?.uid)
-                    .snapshots(),
-                builder: (context, snap) {
-                  final data = snap.data?.data() as Map<String, dynamic>?;
-                  final name = data?['fullName']?.toString() ?? 'User';
-                  final email = FirebaseAuth.instance.currentUser?.email ?? '';
+          child: SingleChildScrollView( // 1. Thêm widget này bao bên ngoài
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser?.uid)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    final data = snap.data?.data() as Map<String, dynamic>?;
+                    final name = data?['fullName']?.toString() ?? 'User';
+                    final email = FirebaseAuth.instance.currentUser?.email ?? '';
 
-                  return InfoCard(
-                    name: name,
-                    bio: email,
-                  );
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 24, top: 32, bottom: 16),
-                child: Text(
-                  "Browse".toUpperCase(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium!
-                      .copyWith(color: Colors.white70),
+                    return InfoCard(
+                      name: name,
+                      bio: email,
+                    );
+                  },
                 ),
-              ),
-
-              ...sidebarMenus.map((menu) => SideMenu(
-                menu: menu,
-                selectedMenu: selectedSideMenu,
-                press: _handleMenuTap,
-                riveOnInit: (artboard) {
-                  menu.rive.status = RiveUtils.getRiveInput(
-                    artboard,
-                    stateMachineName: menu.rive.stateMachineName,
-                  );
-                },
-              )),
-
-              Padding(
-                padding: const EdgeInsets.only(left: 24, top: 40, bottom: 16),
-                child: Text(
-                  "History".toUpperCase(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium!
-                      .copyWith(color: Colors.white70),
+                Padding(
+                  padding: const EdgeInsets.only(left: 24, top: 32, bottom: 16),
+                  child: Text(
+                    "Browse".toUpperCase(),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium!
+                        .copyWith(color: Colors.white70),
+                  ),
                 ),
-              ),
 
-              ...sidebarMenus2.map((menu) => SideMenu(
-                menu: menu,
-                selectedMenu: selectedSideMenu,
-                press: _handleMenuTap,
-                riveOnInit: (artboard) {
-                  menu.rive.status = RiveUtils.getRiveInput(
-                    artboard,
-                    stateMachineName: menu.rive.stateMachineName,
-                  );
-                },
-              )),
-            ],
+                ...sidebarMenus.map((menu) => SideMenu(
+                  menu: menu,
+                  selectedMenu: selectedSideMenu,
+                  press: _handleMenuTap,
+                  riveOnInit: (artboard) {
+                    menu.rive.status = RiveUtils.getRiveInput(
+                      artboard,
+                      stateMachineName: menu.rive.stateMachineName,
+                    );
+                  },
+                )),
+
+                Padding(
+                  padding: const EdgeInsets.only(left: 24, top: 40, bottom: 16),
+                  child: Text(
+                    "History".toUpperCase(),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium!
+                        .copyWith(color: Colors.white70),
+                  ),
+                ),
+
+                ...sidebarMenus2.map((menu) => SideMenu(
+                  menu: menu,
+                  selectedMenu: selectedSideMenu,
+                  press: _handleMenuTap,
+                  riveOnInit: (artboard) {
+                    menu.rive.status = RiveUtils.getRiveInput(
+                      artboard,
+                      stateMachineName: menu.rive.stateMachineName,
+                    );
+                  },
+                )),
+                const SizedBox(height: 50),
+              ],
+            ),
           ),
         ),
       ),
