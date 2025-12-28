@@ -5,13 +5,10 @@ import 'package:rive/rive.dart';
 import 'package:baocaocuoiky/screens/entryPoint/entry_point.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:baocaocuoiky/services/auth_service.dart'; 
 
 class SignInForm extends StatefulWidget {
-  const SignInForm({
-    super.key,
-    required this.onModeChanged,
-  });
+  const SignInForm({super.key, required this.onModeChanged});
   final ValueChanged<bool> onModeChanged;
 
   @override
@@ -19,7 +16,6 @@ class SignInForm extends StatefulWidget {
 }
 
 class _SignInFormState extends State<SignInForm> {
-  // ... (Giữ nguyên các controller và biến state của bạn) ...
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
@@ -36,11 +32,10 @@ class _SignInFormState extends State<SignInForm> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool isShowLoading = false;
   bool isShowConfetti = false;
-  late SMITrigger error, success, reset, confetti;
+  
+  // Dùng Nullable (?) để tránh lỗi LateInitializationError
+  SMITrigger? error, success, reset, confetti;
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
-
-  // ... (Giữ nguyên các hàm dispose, RiveInit, generateId của bạn) ...
   @override
   void dispose() {
     _nameCtrl.dispose(); _emailCtrl.dispose(); _passCtrl.dispose(); _confirmCtrl.dispose();
@@ -50,86 +45,52 @@ class _SignInFormState extends State<SignInForm> {
   void _onCheckRiveInit(Artboard artboard) {
     StateMachineController? controller = StateMachineController.fromArtboard(artboard, 'State Machine 1');
     artboard.addController(controller!);
-    error = controller.findInput<bool>('Error') as SMITrigger;
-    success = controller.findInput<bool>('Check') as SMITrigger;
-    reset = controller.findInput<bool>('Reset') as SMITrigger;
+    error = controller.findInput<bool>('Error') as SMITrigger?;
+    success = controller.findInput<bool>('Check') as SMITrigger?;
+    reset = controller.findInput<bool>('Reset') as SMITrigger?;
   }
 
   void _onConfettiRiveInit(Artboard artboard) {
     StateMachineController? controller = StateMachineController.fromArtboard(artboard, "State Machine 1");
     artboard.addController(controller!);
-    confetti = controller.findInput<bool>("Trigger explosion") as SMITrigger;
+    confetti = controller.findInput<bool>("Trigger explosion") as SMITrigger?;
   }
 
-  String _generateId(String prefix) => '${prefix}_${DateTime.now().millisecondsSinceEpoch}';
-
-  // ... (Giữ nguyên hàm _saveUserToFirestore) ...
-  Future<void> _saveUserToFirestore(User user, String fullName, String role) async {
-    final accountId = _generateId('ACC');
-    String defaultAvatar = user.photoURL ?? "https://ui-avatars.com/api/?name=$fullName&background=random&size=128";
-
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-      'fullName': fullName, 'email': user.email, 'accountId': accountId,
-      'role': role, 'profileImage': defaultAvatar, 'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    if (role == 'student') {
-      final q = await FirebaseFirestore.instance.collection('students').where('accountId', isEqualTo: accountId).get();
-      if(q.docs.isEmpty) {
-        await FirebaseFirestore.instance.collection('students').add({
-          'hocSinhId': _generateId('HS'), 'fullName': fullName, 'email': user.email,
-          'maHocSinh': '', 'accountId': accountId, 'ngaySinh': null, 'gioiTinh': null,
-          'className': null, 'lopId': null, 'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-    } else if (role == 'teacher') {
-      final q = await FirebaseFirestore.instance.collection('teachers').where('accountId', isEqualTo: accountId).get();
-      if(q.docs.isEmpty) {
-        await FirebaseFirestore.instance.collection('teachers').add({
-          'giaoVienId': _generateId('GV'), 'hoTen': fullName, 'email': user.email,
-          'maGiaoVien': '', 'accountId': accountId, 'ngaySinh': null, 'gioiTinh': null,
-          'boMonId': null, 'lopDangDay': [], 'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-    }
-  }
-
-  // ... (Giữ nguyên hàm _handleGoogleSignIn) ...
+  // --- LOGIC GỌI AUTH SERVICE (ĐÃ TÁCH) ---
   Future<void> _handleGoogleSignIn() async {
     try {
       setState(() { isShowLoading = true; isShowConfetti = true; });
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) { setState(() => isShowLoading = false); return; }
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken, idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      final User? user = userCredential.user;
+      
+      // 1. Gọi Service để đăng nhập
+      final User? user = await AuthService.signInWithGoogle();
 
       if (user != null) {
+        // 2. Kiểm tra xem User đã có trong DB chưa
         final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        
         if (userDoc.exists) {
-          success.fire();
+          // Case A: Đã có -> Vào App luôn
+          success?.fire();
           await Future.delayed(const Duration(seconds: 1));
           if (!mounted) return;
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const EntryPoint()));
         } else {
+          // Case B: Chưa có -> Hiện Dialog bổ sung thông tin
           setState(() => isShowLoading = false);
           if (!mounted) return;
-          await _showGoogleAdditionalInfoDialog(user, googleUser.displayName ?? "");
+          await _showGoogleAdditionalInfoDialog(user, user.displayName ?? "");
         }
+      } else {
+        // User hủy đăng nhập
+        setState(() => isShowLoading = false);
       }
     } catch (e) {
-      error.fire();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Google Error: $e")));
+      error?.fire();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi đăng nhập: $e")));
       setState(() => isShowLoading = false);
     }
   }
 
-  // ... (Giữ nguyên hàm _showGoogleAdditionalInfoDialog) ...
   Future<void> _showGoogleAdditionalInfoDialog(User user, String defaultName) async {
     final nameController = TextEditingController(text: defaultName);
     String tempRole = 'student';
@@ -138,32 +99,81 @@ class _SignInFormState extends State<SignInForm> {
       builder: (context) {
         return StatefulBuilder(builder: (context, setStateDialog) {
           return AlertDialog(
-            title: const Text("Hoàn tất đăng ký"),
-            content: Column( mainAxisSize: MainAxisSize.min, children: [
-              const Text("Vui lòng xác nhận tên và vai trò."), const SizedBox(height: 16),
-              TextField(controller: nameController, decoration: const InputDecoration(labelText: "Họ và tên", border: OutlineInputBorder())),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: tempRole,
-                decoration: const InputDecoration(labelText: "Vai trò", border: OutlineInputBorder()),
-                items: _roles.map((role) => DropdownMenuItem(value: role['value'], child: Text(role['label']!))).toList(),
-                onChanged: (val) { setStateDialog(() => tempRole = val!); },
-              ),
-            ]),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            backgroundColor: Colors.white,
+            title: const Text("Hoàn tất đăng ký", style: TextStyle(fontWeight: FontWeight.w700)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Vui lòng xác nhận tên và vai trò.", style: TextStyle(color: Colors.black54)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: "Họ và tên",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: tempRole,
+                  decoration: const InputDecoration(
+                    labelText: "Vai trò",
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _roles
+                      .map((role) => DropdownMenuItem(value: role['value'], child: Text(role['label']!)))
+                      .toList(),
+                  onChanged: (val) {
+                    setStateDialog(() => tempRole = val!);
+                  },
+                ),
+              ],
+            ),
+            actionsPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             actions: [
-              TextButton(onPressed: () async { await FirebaseAuth.instance.signOut(); await _googleSignIn.signOut(); Navigator.pop(context); }, child: const Text("Hủy")),
-              ElevatedButton(onPressed: () async {
-                if (nameController.text.trim().isEmpty) return;
-                Navigator.pop(context); setState(() => isShowLoading = true);
-                try {
-                  await user.updateDisplayName(nameController.text.trim());
-                  await _saveUserToFirestore(user, nameController.text.trim(), tempRole);
-                  success.fire(); confetti.fire();
-                  await Future.delayed(const Duration(seconds: 2));
-                  if (!mounted) return;
-                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const EntryPoint()));
-                } catch (e) { error.fire(); setState(() => isShowLoading = false); }
-              }, child: const Text("Hoàn tất")),
+              TextButton(
+                onPressed: () async {
+                  await FirebaseAuth.instance.signOut();
+                  Navigator.pop(context);
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF6A7280),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                child: const Text("Hủy"),
+              ),
+              SizedBox(
+                height: 42,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (nameController.text.trim().isEmpty) return;
+                    Navigator.pop(context);
+                    setState(() => isShowLoading = true);
+                    try {
+                      await user.updateDisplayName(nameController.text.trim());
+                      await AuthService.saveNewUserToFirestore(user, nameController.text.trim(), tempRole);
+                      success?.fire();
+                      confetti?.fire();
+                      await Future.delayed(const Duration(seconds: 2));
+                      if (!mounted) return;
+                      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const EntryPoint()));
+                    } catch (e) {
+                      error?.fire();
+                      setState(() => isShowLoading = false);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF5B8DEF),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 2,
+                    minimumSize: const Size(110, 42),
+                  ),
+                  child: const Text("Hoàn tất"),
+                ),
+              ),
             ],
           );
         });
@@ -171,34 +181,12 @@ class _SignInFormState extends State<SignInForm> {
     );
   }
 
-  // ... (Giữ nguyên hàm _forgotPassword) ...
-  Future<void> _forgotPassword() async {
-    final TextEditingController emailController = TextEditingController(text: _emailCtrl.text.trim());
-    await showDialog(
-      context: context, builder: (context) => AlertDialog(
-      title: const Text("Đặt lại mật khẩu"),
-      content: TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email", hintText: "email@example.com")),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("Hủy")),
-        ElevatedButton(onPressed: () async {
-          if (emailController.text.isNotEmpty) {
-            try { await FirebaseAuth.instance.sendPasswordResetEmail(email: emailController.text.trim());
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Đã gửi email!"))); } catch (e) {}
-          }
-          Navigator.pop(context);
-        }, child: const Text("Gửi")),
-      ],
-    ),
-    );
-  }
-
-  // ... (Giữ nguyên hàm submit) ...
   Future<void> submit(BuildContext context) async {
     setState(() { isShowConfetti = true; isShowLoading = true; });
     await Future.delayed(const Duration(seconds: 1));
     if (!_formKey.currentState!.validate()) {
-      setState(() => isShowLoading = false); error.fire();
-      Future.delayed(const Duration(seconds: 2), () => reset.fire()); return;
+      setState(() => isShowLoading = false); error?.fire();
+      Future.delayed(const Duration(seconds: 2), () => reset?.fire()); return;
     }
     try {
       final email = _emailCtrl.text.trim(); final pass = _passCtrl.text.trim();
@@ -206,16 +194,40 @@ class _SignInFormState extends State<SignInForm> {
         final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: pass);
         final fullName = _nameCtrl.text.trim();
         await cred.user!.updateDisplayName(fullName);
-        await _saveUserToFirestore(cred.user!, fullName, _selectedRole);
+        
+        // Gọi Service để lưu
+        await AuthService.saveNewUserToFirestore(cred.user!, fullName, _selectedRole);
       } else {
         await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: pass);
       }
-      success.fire(); await Future.delayed(const Duration(seconds: 1)); confetti.fire();
+      success?.fire(); await Future.delayed(const Duration(seconds: 1)); confetti?.fire();
       await Future.delayed(const Duration(seconds: 1));
       if (!context.mounted) return;
       Navigator.push(context, MaterialPageRoute(builder: (_) => const EntryPoint()));
-    } catch (e) { error.fire(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e"))); }
-    finally { if (mounted) setState(() => isShowLoading = false); reset.fire(); }
+    } catch (e) { error?.fire(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e"))); }
+    finally { if (mounted) setState(() => isShowLoading = false); reset?.fire(); }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Nhập email trước khi đặt lại mật khẩu")),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Đã gửi email đặt lại mật khẩu. Kiểm tra hộp thư của bạn.")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Không gửi được email đặt lại mật khẩu: $e")),
+      );
+    }
   }
 
   @override
@@ -266,30 +278,36 @@ class _SignInFormState extends State<SignInForm> {
                 ),
               ),
 
-              // --- 3 NÚT MẠNG XÃ HỘI ---
+              // --- NÚT GOOGLE ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   IconButton(onPressed: () {}, icon: SvgPicture.asset("assets/icons/email_box.svg", height: 64, width: 64)),
                   IconButton(onPressed: () {}, icon: SvgPicture.asset("assets/icons/apple_box.svg", height: 64, width: 64)),
+                  // Gọi hàm mới đã sửa
                   IconButton(onPressed: _handleGoogleSignIn, padding: EdgeInsets.zero, icon: SvgPicture.asset("assets/icons/google_box.svg", height: 64, width: 64)),
                 ],
               ),
 
               const SizedBox(height: 16),
 
-              // --- SỬA LỖI OVERFLOW (DÙNG FLEXIBLE/SPACER) ---
               Row(
                 children: [
                   if (!_isSignUp)
                     InkWell(
                       onTap: _forgotPassword,
-                      child: const Text("Quên mật khẩu?", style: TextStyle(color: Colors.blue, fontSize: 13, fontWeight: FontWeight.w500)),
+                      child: const Text(
+                        "Quên mật khẩu?",
+                        style: TextStyle(
+                          color: Color(0xFF5B8DEF),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
                     ),
-
-                  const Spacer(), // Đẩy nút kia sang phải
-
-                  Flexible( // Cho phép co dãn để không bị tràn
+                  const Spacer(),
+                  Flexible(
                     child: InkWell(
                       onTap: () {
                         setState(() { _isSignUp = !_isSignUp; _confirmCtrl.clear(); _selectedRole = 'student'; });
@@ -299,7 +317,7 @@ class _SignInFormState extends State<SignInForm> {
                         _isSignUp ? "Đã có TK? Đăng nhập" : "Chưa có TK? Đăng ký",
                         textAlign: TextAlign.right,
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFFF77D8E)),
-                        overflow: TextOverflow.ellipsis, // Nếu dài quá thì hiện ...
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
@@ -315,7 +333,6 @@ class _SignInFormState extends State<SignInForm> {
   }
 }
 
-// --- CLASS CustomPositioned ĐỂ Ở CUỐI FILE ---
 class CustomPositioned extends StatelessWidget {
   const CustomPositioned({super.key, this.scale = 1, required this.child});
   final double scale;

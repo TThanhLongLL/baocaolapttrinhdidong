@@ -218,10 +218,10 @@ class _StudentManagementScreenState extends State<StudentManagementScreen> {
   String? selectedLopId = student.lopId;
 
   var snapshot = await FirebaseFirestore.instance.collection('classes').get();
-  classList = snapshot.docs.map((d) {
-    final classData = d.data() as Map<String, dynamic>;
-    return classData['className'] as String;
-  }).toList();
+  classList = snapshot.docs
+      .where((d) => d.data()['className'] != null && d.data()['className'].toString().isNotEmpty)
+      .map((d) => d.data()['className'] as String)
+      .toList();
 
   if (!context.mounted) return;
 

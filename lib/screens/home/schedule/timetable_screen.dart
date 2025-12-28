@@ -37,12 +37,13 @@ class _TimetableScreenState extends State<TimetableScreen> with SingleTickerProv
   }
 
   // Logic tìm ngày Thứ 2 đầu tuần của tuần hiện tại
-  void _initializeWeek() {
+ void _initializeWeek() {
     DateTime now = DateTime.now();
-    // Trừ đi số ngày lẻ để về Thứ 2 (weekday của T2 là 1)
-    _startOfWeek = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    // Luôn lấy thứ 2 của tuần hiện tại
+    // Nếu hôm nay >= T2, lấy T2 tuần này; còn không lấy T2 tuần trước
+    int daysToMonday = (now.weekday - 1); // 0 nếu T2, 1 nếu T3, ..., 6 nếu CN
+    _startOfWeek = now.subtract(Duration(days: daysToMonday));
   }
-
   // Hàm chuyển tuần (Next / Previous)
   void _changeWeek(int offset) {
     setState(() {

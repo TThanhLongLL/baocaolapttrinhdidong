@@ -27,6 +27,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   String userName = "Đang tải...";
   String userEmail = "Đang tải...";
   String userAvatar = "https://ui-avatars.com/api/?name=User&background=random";
+  List<String> userClasses = [];
+  List<String> userClassIds = [];
+  List<Map<String, dynamic>> upcomingLessons = [];
   @override
   void initState() {
     super.initState();
@@ -81,6 +84,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             userEmail = data['email'] ?? user.email ?? 'Email';
             userAvatar = imgLink;
           });
+          await _loadUserClasses(data);
+          await _loadUpcomingLessons();
           addAllListData();
         }
       }
@@ -88,6 +93,155 @@ class _ProfileScreenState extends State<ProfileScreen>
       print("Lỗi tải dữ liệu: $e");
     }
   }
+
+  Future<void> _loadUserClasses(Map<String, dynamic> data) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final role = data['role'] ?? 'student';
+      List<String> classes = [];
+      List<String> classIds = [];
+
+      if (role == 'teacher') {
+        // Fallback các trường teacherId/giaoVienId hoặc tra theo accountId/email trong bảng teachers
+        String? teacherId = data['teacherId'] ?? data['giaoVienId'];
+        final accountId = data['accountId'];
+        if (teacherId == null && accountId != null) {
+          final q = await FirebaseFirestore.instance
+              .collection('teachers')
+              .where('accountId', isEqualTo: accountId)
+              .limit(1)
+              .get();
+          if (q.docs.isNotEmpty) {
+            teacherId = q.docs.first.data()['giaoVienId'] ?? q.docs.first.data()['teacherId'];
+          }
+        }
+        if (teacherId == null && data['email'] != null) {
+          final q = await FirebaseFirestore.instance
+              .collection('teachers')
+              .where('email', isEqualTo: data['email'])
+              .limit(1)
+              .get();
+          if (q.docs.isNotEmpty) {
+            teacherId = q.docs.first.data()['giaoVienId'] ?? q.docs.first.data()['teacherId'];
+          }
+        }
+        teacherId ??= user.uid;
+
+        final snap = await FirebaseFirestore.instance
+            .collection('classes')
+            .where('teacherId', isEqualTo: teacherId)
+            .get();
+        for (final d in snap.docs) {
+          classIds.add(d.id);
+          classes.add((d.data()['className'] ?? 'Lớp chưa đặt tên').toString());
+        }
+      } else {
+        final enrolled = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('enrolledClasses')
+            .get();
+        if (enrolled.docs.isNotEmpty) {
+          final ids = enrolled.docs.map((e) => e.id).toList();
+          final futures = ids.map((id) => FirebaseFirestore.instance.collection('classes').doc(id).get());
+          final docs = await Future.wait(futures);
+          for (final d in docs) {
+            if (d.exists) {
+              classIds.add(d.id);
+              classes.add((d.data()?['className'] ?? 'Lớp chưa đặt tên').toString());
+            }
+          }
+        }
+        if (classes.isEmpty && data['className'] != null) {
+          classes.add(data['className'].toString());
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          userClasses = classes;
+          userClassIds = classIds;
+        });
+      }
+    } catch (e) {
+      print("Lỗi tải lớp học: $e");
+    }
+  }
+
+Future<void> _loadUpcomingLessons() async {
+  try {
+    if (userClassIds.isEmpty) {
+      setState(() => upcomingLessons = []);
+      return;
+    }
+    List<Map<String, dynamic>> lessons = [];
+
+    // Lấy tên lớp
+    Map<String, String> classNames = {};
+    for (final classId in userClassIds) {
+      final classDoc = await FirebaseFirestore.instance.collection('classes').doc(classId).get();
+      classNames[classId] = (classDoc.data()?['className'] ?? 'Lớp chưa đặt tên').toString();
+    }
+
+    final now = Timestamp.fromDate(DateTime.now());
+    for (final classId in userClassIds) {
+      // ✅ Lấy Lessons (buổi học)
+      final lessonsQuery = await FirebaseFirestore.instance
+          .collection('classes')
+          .doc(classId)
+          .collection('lessons')
+          .where('date', isGreaterThanOrEqualTo: now)
+          .orderBy('date')
+          .limit(5)
+          .get();
+      
+      for (final doc in lessonsQuery.docs) {
+        final data = doc.data();
+        data['classId'] = classId;
+        data['className'] = classNames[classId] ?? classId;
+        data['type'] = 'lesson';
+        data['startAt'] = data['date']; // Dùng date làm startAt
+        lessons.add(data);
+      }
+
+      // ✅ Lấy Posts/Assignments (bao gồm assignments với deadline)
+      final postsQuery = await FirebaseFirestore.instance
+          .collection('classes')
+          .doc(classId)
+          .collection('posts')
+          .where('type', isEqualTo: 'assignment')
+          .where('deadline', isGreaterThanOrEqualTo: now)
+          .orderBy('deadline')
+          .limit(5)
+          .get();
+      
+      for (final doc in postsQuery.docs) {
+        final data = doc.data();
+        data['classId'] = classId;
+        data['className'] = classNames[classId] ?? classId;
+        data['type'] = 'assignment';
+        data['startAt'] = data['deadline'];
+        lessons.add(data);
+      }
+    }
+
+    // Sort by startAt (sắp xếp theo ngày)
+    lessons.sort((a, b) {
+      final ta = (a['startAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final tb = (b['startAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      return ta.compareTo(tb);
+    });
+
+    if (mounted) {
+      setState(() {
+        upcomingLessons = lessons.take(5).toList();
+      });
+    }
+  } catch (e) {
+    print("Lỗi tải lịch học: $e");
+  }
+}
 
   @override
   void dispose() {
@@ -120,7 +274,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             parent: animationController,
             curve: const Interval((1 / count) * 2, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: animationController,
-        className: "Lớp: Kỹ Thuật Phần Mềm K18",
+        className: userClasses.isNotEmpty ? userClasses.join(", ") : "Chưa có lớp",
       ),
     );
 
@@ -141,6 +295,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             parent: animationController,
             curve: const Interval((1 / count) * 3, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: animationController,
+        upcomingLessons: upcomingLessons,
       ),
     );
   }
@@ -866,23 +1021,34 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
 class ScheduleCalendarView extends StatelessWidget {
   final AnimationController animationController;
   final Animation<double> animation;
+  final List<Map<String, dynamic>> upcomingLessons;
 
   const ScheduleCalendarView({
     Key? key,
     required this.animationController,
     required this.animation,
+    required this.upcomingLessons,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+  final now = DateTime.now();
+  final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+  final firstWeekday = DateTime(now.year, now.month, 1).weekday;
+  final eventsByDay = <int, List<Map<String, dynamic>>>{};
+  for (final lesson in upcomingLessons) {
+    final startAt = (lesson['startAt'] as Timestamp?)?.toDate();
+    if (startAt != null && startAt.month == now.month && startAt.year == now.year) {
+      eventsByDay.putIfAbsent(startAt.day, () => []).add(lesson);
+    }
+  }
     return AnimatedBuilder(
       animation: animationController,
       builder: (BuildContext context, Widget? child) {
         return FadeTransition(
           opacity: animation,
           child: Transform(
-            transform: Matrix4.translationValues(
-                0.0, 30 * (1.0 - animation.value), 0.0),
+            transform: Matrix4.translationValues(0.0, 30 * (1.0 - animation.value), 0.0),
             child: Padding(
               padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 32),
               child: Container(
@@ -891,9 +1057,10 @@ class ScheduleCalendarView extends StatelessWidget {
                   borderRadius: const BorderRadius.all(Radius.circular(24.0)),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
-                        color: AppTheme.grey.withOpacity(0.2),
-                        offset: const Offset(1.1, 1.1),
-                        blurRadius: 10.0),
+                      color: AppTheme.grey.withOpacity(0.2),
+                      offset: const Offset(1.1, 1.1),
+                      blurRadius: 10.0,
+                    ),
                   ],
                 ),
                 child: Padding(
@@ -904,17 +1071,19 @@ class ScheduleCalendarView extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Row(
-                            children: const [
-                              Icon(Icons.calendar_today, color: AppTheme.nearlyDarkBlue),
-                              SizedBox(width: 8),
-                              Text("Tháng 5, 2024",
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.darkerText)),
+                            children: [
+                              const Icon(Icons.calendar_today, color: AppTheme.nearlyDarkBlue),
+                              const SizedBox(width: 8),
+                              Text(
+                                "Tháng ${now.month}, ${now.year}",
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.darkerText),
+                              ),
                             ],
                           ),
                           Icon(Icons.more_horiz, color: AppTheme.grey.withOpacity(0.5))
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: ["T2","T3","T4","T5","T6","T7","CN"].map((e) =>
@@ -930,22 +1099,26 @@ class ScheduleCalendarView extends StatelessWidget {
                           crossAxisCount: 7,
                           childAspectRatio: 1,
                         ),
-                        itemCount: 31,
+                        itemCount: daysInMonth + (firstWeekday - 1),
                         itemBuilder: (context, index) {
-                          int day = index + 1;
-                          bool isSchoolDay = (day == 15 || day == 20 || day == 22);
-                          bool isDeadline = (day == 25 || day == 28);
-                          bool isToday = (day == 18);
+                          if (index < firstWeekday - 1) {
+                            return const SizedBox.shrink();
+                          }
+                          int day = index - firstWeekday + 2;  // 🔧 Sửa dòng này
+                          final isToday = day == now.day;  // 🔧 Cũng sửa dòng này
+                          final events = eventsByDay[day] ?? [];
+                          final hasLesson = events.any((e) => (e['type'] ?? 'lesson') == 'lesson');
+                          final hasDeadline = events.any((e) => (e['type'] ?? 'lesson') == 'assignment');
 
-                          Color bgColor = Colors.transparent;
+                          Color? bgColor;
                           Color textColor = AppTheme.darkerText;
                           BoxBorder? border;
 
-                          if (isSchoolDay) {
-                            bgColor = AppTheme.nearlyDarkBlue;
-                            textColor = Colors.white;
-                          } else if (isDeadline) {
+                          if (hasDeadline) {
                             bgColor = Colors.redAccent;
+                            textColor = Colors.white;
+                          } else if (hasLesson) {
+                            bgColor = AppTheme.nearlyDarkBlue;
                             textColor = Colors.white;
                           } else if (isToday) {
                             border = Border.all(color: AppTheme.nearlyBlue, width: 2);
@@ -955,7 +1128,7 @@ class ScheduleCalendarView extends StatelessWidget {
                           return Container(
                             margin: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: bgColor,
+                              color: bgColor ?? Colors.transparent,
                               shape: BoxShape.circle,
                               border: border,
                             ),
@@ -965,14 +1138,14 @@ class ScheduleCalendarView extends StatelessWidget {
                                 style: TextStyle(
                                     color: textColor,
                                     fontSize: 13,
-                                    fontWeight: (isSchoolDay || isDeadline || isToday) ? FontWeight.bold : FontWeight.normal
+                                    fontWeight: (bgColor != null || isToday) ? FontWeight.bold : FontWeight.normal
                                 ),
                               ),
                             ),
                           );
                         },
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                         decoration: BoxDecoration(
@@ -985,7 +1158,7 @@ class ScheduleCalendarView extends StatelessWidget {
                             Row(children: const [
                               CircleAvatar(radius: 4, backgroundColor: AppTheme.nearlyDarkBlue),
                               SizedBox(width: 6),
-                              Text("Đi học", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))
+                              Text("lịch học", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))
                             ]),
                             Container(width: 1, height: 16, color: Colors.grey.withOpacity(0.4)),
                             Row(children: const [
@@ -995,7 +1168,8 @@ class ScheduleCalendarView extends StatelessWidget {
                             ]),
                           ],
                         ),
-                      )
+                      ),
+                    
                     ],
                   ),
                 ),
@@ -1007,3 +1181,6 @@ class ScheduleCalendarView extends StatelessWidget {
     );
   }
 }
+          
+
+

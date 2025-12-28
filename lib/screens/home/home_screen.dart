@@ -346,53 +346,67 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildClassList(AsyncSnapshot<QuerySnapshot> snapshot, {required bool isTeacher}) {
-    if (snapshot.connectionState == ConnectionState.waiting) {
-      return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
-    }
+  if (snapshot.connectionState == ConnectionState.waiting) {
+    return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+  }
 
-    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-      return Container(
-        height: 180,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.grey.shade200),
+  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Center(
+        child: Text(
+          isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
+          style: TextStyle(
+            color: Colors.grey.shade600,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.school_outlined, size: 48, color: Colors.grey.shade300),
-            const SizedBox(height: 12),
-            Text(
-              isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
-              style: TextStyle(color: Colors.grey.shade500),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final docs = snapshot.data!.docs;
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final String classId = isTeacher ? doc.id : (data['classId'] ?? doc.id);
-
-          return Padding(
-            padding: const EdgeInsets.only(right: 20),
-            child: CourseCard(
-              classId: classId,
-              iconSrc: "assets/icons/ios.svg",
-              color: const Color(0xFF7553F6),
-            ),
-          );
-        }).toList(),
       ),
     );
   }
+
+  final docs = snapshot.data!.docs;
+  
+  // ✅ Filter ra những classId hợp lệ
+  final validClassIds = <String>[];
+  for (final doc in docs) {
+    final classId = doc.id;
+    validClassIds.add(classId);
+  }
+
+  // Nếu sau khi filter mà không còn card nào -> hiện thông báo
+  if (validClassIds.isEmpty) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Center(
+        child: Text(
+          isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
+          style: TextStyle(
+            color: Colors.grey.shade600,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  return SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    clipBehavior: Clip.none,
+    child: Row(
+      children: validClassIds.map((classId) {
+        return Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: CourseCard(
+            classId: classId,
+            iconSrc: "assets/icons/ios.svg",
+            color: const Color(0xFF7553F6),
+          ),
+        );
+      }).toList(),
+    ),
+  );
+}
 }

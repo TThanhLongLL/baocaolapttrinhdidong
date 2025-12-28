@@ -94,6 +94,8 @@ class _CourseCardState extends State<CourseCard>
             String duration = '${(lessons * 0.75).ceil()} giờ';
             if (lessons == 0) duration = "0 giờ";
 
+            final classCode = classData['classCode'] ?? 'N/A';
+
             return GestureDetector(
               onTap: () => _navigateToDetail(context, widget.classId, className),
               child: _buildCard(
@@ -105,6 +107,7 @@ class _CourseCardState extends State<CourseCard>
                 duration: duration,
                 lessons: lessons,      // Hiển thị số bài tập thật
                 namHoc: namHoc,
+                classCode: classCode,
               ),
             );
           },
@@ -134,6 +137,7 @@ class _CourseCardState extends State<CourseCard>
         required String duration,
         required int lessons,
         required String namHoc,
+        required String classCode,
       }) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -226,6 +230,17 @@ class _CourseCardState extends State<CourseCard>
               color: Colors.white.withOpacity(0.8),
               fontSize: 12,
               fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Mã lớp: $classCode",
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const Spacer(),
@@ -339,22 +354,7 @@ class _CourseCardState extends State<CourseCard>
   }
 
   Widget _buildErrorCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      height: 360,
-      width: 280,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.grey, Colors.grey.withOpacity(0.8)], // Màu xám khi lỗi
-        ),
-        borderRadius: const BorderRadius.all(Radius.circular(28)),
-      ),
-      child: const Center(
-        child: Text("Không tìm thấy dữ liệu", style: TextStyle(color: Colors.white)),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildStatItem({

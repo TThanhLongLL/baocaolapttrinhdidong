@@ -1,17 +1,27 @@
 import 'package:rive/rive.dart';
 
 class RiveUtils {
-  static SMIBool getRiveInput(Artboard artboard,
+  static SMIBool? getRiveInput(Artboard artboard,
       {required String stateMachineName}) {
     StateMachineController? controller =
         StateMachineController.fromArtboard(artboard, stateMachineName);
 
-    artboard.addController(controller!);
+    if (controller == null) {
+      print('⚠️ StateMachineController không tìm thấy: $stateMachineName');
+      return null;
+    }
 
-    return controller.findInput<bool>("active") as SMIBool;
+    artboard.addController(controller);
+
+    final input = controller.findInput<bool>("active") as SMIBool?;
+    if (input == null) {
+      print('⚠️ Input "active" không tìm thấy trong: $stateMachineName');
+    }
+    return input;
   }
 
-  static void chnageSMIBoolState(SMIBool input) {
+  static void chnageSMIBoolState(SMIBool? input) {
+    if (input == null) return;
     input.change(true);
     Future.delayed(
       const Duration(seconds: 1),

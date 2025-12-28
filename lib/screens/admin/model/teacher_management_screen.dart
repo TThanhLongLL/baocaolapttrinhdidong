@@ -215,12 +215,12 @@ class _TeacherManagementScreenState extends State<TeacherManagementScreen> {
   List<String> selectedLopDangDay = List.from(teacher.lopDangDay);
   
   // Lấy danh sách lớp
-  List<String> classList = [];
+List<String> classList = [];
   var classSnapshot = await FirebaseFirestore.instance.collection('classes').get();
-  classList = classSnapshot.docs.map((d) {
-    final classData = d.data() as Map<String, dynamic>;
-    return classData['className'] as String;
-  }).toList();
+  classList = classSnapshot.docs
+    .where((d) => d.data()['className'] != null && d.data()['className'].toString().isNotEmpty)
+    .map((d) => d.data()['className'] as String)
+    .toList();
 
   if (!context.mounted) return;
 

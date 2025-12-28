@@ -125,10 +125,13 @@ class _SideBarState extends State<SideBar> {
                   selectedMenu: selectedSideMenu,
                   press: _handleMenuTap,
                   riveOnInit: (artboard) {
-                    menu.rive.status = RiveUtils.getRiveInput(
+                    final riveInput = RiveUtils.getRiveInput(
                       artboard,
                       stateMachineName: menu.rive.stateMachineName,
                     );
+                    if (riveInput != null) {
+                      menu.rive.status = riveInput;
+                    }
                   },
                 )),
                 const SizedBox(height: 50),

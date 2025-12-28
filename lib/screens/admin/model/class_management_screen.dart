@@ -211,6 +211,12 @@ class _ClassManagementScreenState extends State<ClassManagementScreen> {
     );
   }
 
+  String _generateClassCode() {
+    final millis = DateTime.now().millisecondsSinceEpoch.toString();
+    final suffix = millis.substring(millis.length - 6);
+    return "CL-$suffix";
+  }
+
   // --- HÀM QUAN TRỌNG ĐÃ SỬA ---
   void _showFormDialog(BuildContext context, DocumentSnapshot? doc) async {
     bool isEditing = doc != null;
@@ -404,10 +410,14 @@ class _ClassManagementScreenState extends State<ClassManagementScreen> {
                     return;
                   }
 
+                  final generatedCode = controllerClassCode.text.trim().isEmpty
+                      ? _generateClassCode()
+                      : controllerClassCode.text.trim();
+
                   final mapData = {
                     'className': controllerClassName.text,
                     'khoaHoc': controllerKhoaHoc.text,
-                    'classCode': controllerClassCode.text,
+                    'classCode': generatedCode,
                     'namHoc': controllerNamHoc.text,
                     'dateStart': Timestamp.fromDate(dateStart),
                     'dateEnd': Timestamp.fromDate(dateEnd),
