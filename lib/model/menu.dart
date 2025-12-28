@@ -9,28 +9,28 @@ class Menu {
 
 List<Menu> sidebarMenus = [
   Menu(
-    title: "Home",
+    title: "Trang Chủ",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "HOME",
         stateMachineName: "HOME_interactivity"),
   ),
   Menu(
-    title: "Search",
+    title: "Tìm kiếm",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "SEARCH",
         stateMachineName: "SEARCH_Interactivity"),
   ),
   Menu(
-    title: "Favorites",
+    title: "Yêu Thích",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "LIKE/STAR",
         stateMachineName: "STAR_Interactivity"),
   ),
   Menu(
-    title: "Help",
+    title: "Giúp Đỡ",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "CHAT",
@@ -39,21 +39,21 @@ List<Menu> sidebarMenus = [
 ];
 List<Menu> sidebarMenus2 = [
   Menu(
-    title: "History",
+    title: "Lịch Sử",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "TIMER",
         stateMachineName: "TIMER_Interactivity"),
   ),
   Menu(
-    title: "Notifications",
+    title: "Thông Báo",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "BELL",
         stateMachineName: "BELL_Interactivity"),
   ),
   Menu(
-    title: "Admin Panel",
+    title: "Admin",
     rive: RiveModel(
         src: "assets/RiveAssets/icons.riv",
         artboard: "SETTINGS", // Dùng tạm icon settings

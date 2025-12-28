@@ -26,7 +26,7 @@ class _SideBarState extends State<SideBar> {
     if (status != null) {
       RiveUtils.chnageSMIBoolState(status);
     }
-    if (menu.title == "Admin Panel") {
+    if (menu.title == "Admin") {
       if (!context.mounted) return;
       Navigator.push(
         context,

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'sign_in_form.dart'; // Import file Form
 
-import 'sign_in_form.dart';
-
-void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
+void showCustomDialog(BuildContext context, {required ValueChanged<bool> onValue}) {
   showGeneralDialog(
     context: context,
     barrierLabel: "Barrier",
@@ -11,11 +9,12 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
     barrierColor: Colors.black.withOpacity(0.5),
     transitionDuration: const Duration(milliseconds: 400),
     pageBuilder: (_, __, ___) {
+      // Biến này chỉ để thay đổi Tiêu đề (Sign In / Sign Up)
       final ValueNotifier<bool> isSignUp = ValueNotifier(false);
 
       return Center(
         child: Container(
-          height: 800,
+          height: 640, // Chiều cao cố định vừa vặn
           margin: const EdgeInsets.symmetric(horizontal: 16),
           padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
           decoration: BoxDecoration(
@@ -35,12 +34,14 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
             ],
           ),
           child: Scaffold(
+            backgroundColor: Colors.transparent,
             body: Stack(
               clipBehavior: Clip.none,
               children: [
                 SingleChildScrollView(
                   child: Column(
                     children: [
+                      // Tiêu đề thay đổi theo trạng thái
                       ValueListenableBuilder<bool>(
                         valueListenable: isSignUp,
                         builder: (context, v, _) {
@@ -54,86 +55,24 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
                           );
                         },
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: ValueListenableBuilder<bool>(
-                          valueListenable: isSignUp,
-                          builder: (context, v, _) {
-                            return Text(
-                              v ? "Tạo tài khoản mới" : "Vui lòng đăng nhập",
-                              textAlign: TextAlign.center,
-                            );
-                          },
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          "Vui lòng nhập thông tin để tiếp tục",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.black54),
                         ),
                       ),
+
+                      // --- GỌI FORM Ở ĐÂY (Toàn bộ logic nằm trong này) ---
                       SignInForm(
                         onModeChanged: (v) => isSignUp.value = v,
                       ),
-                      const Row(
-                        children: [
-                          Expanded(child: Divider()),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 16),
-                            child: Text(
-                              "OR",
-                              style: TextStyle(
-                                color: Colors.black26,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          Expanded(child: Divider()),
-                        ],
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 24),
-                        child: ValueListenableBuilder<bool>(
-                          valueListenable: isSignUp,
-                          builder: (context, v, _) {
-                            return Text(
-                              v
-                                  ? "Sign up with Email, Apple or Google"
-                                  : "Continue with Email, Apple or Google",
-                              style: const TextStyle(color: Colors.black54),
-                            );
-                          },
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          IconButton(
-                            onPressed: () {},
-                            padding: EdgeInsets.zero,
-                            icon: SvgPicture.asset(
-                              "assets/icons/email_box.svg",
-                              height: 64,
-                              width: 64,
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () {},
-                            padding: EdgeInsets.zero,
-                            icon: SvgPicture.asset(
-                              "assets/icons/apple_box.svg",
-                              height: 64,
-                              width: 64,
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () {},
-                            padding: EdgeInsets.zero,
-                            icon: SvgPicture.asset(
-                              "assets/icons/google_box.svg",
-                              height: 64,
-                              width: 64,
-                            ),
-                          ),
-                        ],
-                      ),
+                      // ----------------------------------------------------
                     ],
                   ),
                 ),
+                // Nút đóng (X)
                 const Positioned(
                   left: 0,
                   right: 0,
@@ -141,11 +80,7 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
                   child: CircleAvatar(
                     radius: 16,
                     backgroundColor: Colors.white,
-                    child: Icon(
-                      Icons.close,
-                      size: 20,
-                      color: Colors.black,
-                    ),
+                    child: Icon(Icons.close, size: 20, color: Colors.black),
                   ),
                 )
               ],
@@ -156,7 +91,6 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
     },
     transitionBuilder: (_, anim, __, child) {
       final tween = Tween(begin: const Offset(0, -1), end: Offset.zero);
-
       return SlideTransition(
         position: tween.animate(
           CurvedAnimation(parent: anim, curve: Curves.easeInOut),
@@ -164,5 +98,5 @@ void showCustomDialog(BuildContext context, {required ValueChanged onValue}) {
         child: child,
       );
     },
-  ).then(onValue);
+  ).then((_) => onValue(true));
 }
