@@ -89,7 +89,7 @@ class _SideBarState extends State<SideBar> {
                 Padding(
                   padding: const EdgeInsets.only(left: 24, top: 32, bottom: 16),
                   child: Text(
-                    "Browse".toUpperCase(),
+                    "Chính".toUpperCase(),
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium!
@@ -112,7 +112,7 @@ class _SideBarState extends State<SideBar> {
                 Padding(
                   padding: const EdgeInsets.only(left: 24, top: 40, bottom: 16),
                   child: Text(
-                    "History".toUpperCase(),
+                    "Lịch Sử".toUpperCase(),
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium!

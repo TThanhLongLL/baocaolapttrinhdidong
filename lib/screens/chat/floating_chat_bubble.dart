@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:baocaocuoiky/screens/chat/chat_screen.dart';
-import 'package:baocaocuoiky/constants.dart'; // Để lấy màu sắc nếu cần
+import 'package:baocaocuoiky/constants.dart'; 
 
 class FloatingChatBubble extends StatefulWidget {
   const FloatingChatBubble({Key? key}) : super(key: key);

@@ -14,6 +14,8 @@ import 'components/side_bar.dart';
 import 'package:baocaocuoiky/screens/home/class/class_management_screen.dart';
 import 'package:baocaocuoiky/screens/chat/floating_chat_bubble.dart';
 import 'package:baocaocuoiky/screens/home/schedule/timetable_screen.dart';
+import 'package:baocaocuoiky/screens/chat/chat_list_screen.dart';
+
 class EntryPoint extends StatefulWidget {
   const EntryPoint({super.key});
 
@@ -184,6 +186,10 @@ class _EntryPointState extends State<EntryPoint>
                              else if (navBar.title == "Notification") {
                               // Mo thoi khoa bieu
                               _currentScreen = const TimetableScreen();
+                            }
+                            else if (navBar.title == "Chat") {
+                              // Mo thoi chat
+                              _currentScreen = const ChatListScreen();
                             }
                           });
                       },
