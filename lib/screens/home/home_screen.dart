@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart'; // [MỚI] Thêm thư viện này để format ngày
 
 import 'components/course_card.dart';
 import 'components/secondary_course_card.dart';
@@ -19,6 +21,13 @@ class _HomePageState extends State<HomePage> {
   String? _accountId;
   String? _teacherId;
   bool _joinExpanded = false;
+  
+  // Các controller cho việc tạo lớp
+  final TextEditingController _newClassNameCtrl = TextEditingController();
+  final TextEditingController _newClassCodeCtrl = TextEditingController();
+  final TextEditingController _newKhoaHocCtrl = TextEditingController(); // [MỚI]
+  final TextEditingController _newNamHocCtrl = TextEditingController(); // [MỚI]
+  final TextEditingController _newMaxMembersCtrl = TextEditingController(); // [MỚI]
 
   @override
   void initState() {
@@ -28,6 +37,11 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _newClassNameCtrl.dispose();
+    _newClassCodeCtrl.dispose();
+    _newKhoaHocCtrl.dispose();
+    _newNamHocCtrl.dispose();
+    _newMaxMembersCtrl.dispose();
     _codeCtrl.dispose();
     super.dispose();
   }
@@ -79,6 +93,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _requestJoin(BuildContext context) async {
+    // ... (Giữ nguyên logic tham gia lớp của học sinh)
     final code = _codeCtrl.text.trim();
     if (code.isEmpty) return;
     final user = FirebaseAuth.instance.currentUser;
@@ -144,9 +159,7 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         bottom: false,
         child: ListView(
-          // --- SỬA Ở ĐÂY: Tăng padding top lên 80 để né nút Menu ---
           padding: const EdgeInsets.fromLTRB(20, 80, 20, 100),
-          // ---------------------------------------------------------
           children: [
             // --- HEADER ---
             Row(
@@ -272,9 +285,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 if (isTeacher)
                   TextButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tính năng tạo lớp')));
-                    },
+                    // [MỚI] Gọi hàm tạo lớp nâng cao
+                    onPressed: () => _showCreateClassDialog(context),
                     icon: const Icon(Icons.add_circle_outline, size: 18),
                     label: const Text("Tạo lớp"),
                   ),
@@ -346,67 +358,359 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildClassList(AsyncSnapshot<QuerySnapshot> snapshot, {required bool isTeacher}) {
-  if (snapshot.connectionState == ConnectionState.waiting) {
-    return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
+    }
+
+    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: Text(
+            isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final docs = snapshot.data!.docs;
+    final validClassIds = <String>[];
+    for (final doc in docs) {
+      validClassIds.add(doc.id);
+    }
+
+    if (validClassIds.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: Text(
+            isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: validClassIds.map((classId) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 20),
+            child: CourseCard(
+              classId: classId,
+              iconSrc: "assets/icons/ios.svg",
+              color: const Color(0xFF7553F6),
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
-  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Center(
-        child: Text(
-          isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
-          style: TextStyle(
-            color: Colors.grey.shade600,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
+  // --- [MỚI] TẠO LỚP ĐẦY ĐỦ CHO GIÁO VIÊN ---
+ // --- GIAO DIỆN TẠO LỚP MỚI (ĐẸP & HIỆN ĐẠI) ---
+  Future<void> _showCreateClassDialog(BuildContext context) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // 1. Khởi tạo giá trị mặc định
+    _newClassNameCtrl.clear();
+    _newKhoaHocCtrl.clear();
+    _newClassCodeCtrl.text = "CL-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}";
+    _newNamHocCtrl.text = "${DateTime.now().year}-${DateTime.now().year + 1}";
+    _newMaxMembersCtrl.text = "50";
+
+    DateTime dateStart = DateTime.now();
+    DateTime dateEnd = DateTime.now().add(const Duration(days: 30 * 4)); // Mặc định 4 tháng
+
+    // Màu chủ đạo
+    const Color primaryColor = Color(0xFF6F5DE8); // Tím xanh hiện đại
+    const Color secondaryColor = Color(0xFF8B80F8); 
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Bắt buộc bấm nút mới đóng
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            backgroundColor: Colors.transparent, // Để hiển thị bo góc mượt mà
+            elevation: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // --- HEADER ---
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [primaryColor, secondaryColor],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(24),
+                        topRight: Radius.circular(24),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.add_business_rounded, color: Colors.white, size: 24),
+                        ),
+                        const SizedBox(width: 16),
+                        const Expanded(
+                          child: Text(
+                            "Tạo Lớp Học Mới",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // --- BODY (SCROLLABLE) ---
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildLabel("Thông tin cơ bản"),
+                          const SizedBox(height: 8),
+                          _buildTextField(_newClassNameCtrl, "Tên lớp (VD: 12A1)", Icons.class_, primaryColor),
+                          const SizedBox(height: 16),
+                          _buildTextField(_newKhoaHocCtrl, "Môn học (VD: Toán)", Icons.menu_book_rounded, primaryColor),
+                          const SizedBox(height: 16),
+                          _buildTextField(_newClassCodeCtrl, "Mã lớp (Tự động)", Icons.qr_code_2_rounded, primaryColor, isReadOnly: true),
+                          
+                          const SizedBox(height: 24),
+                          _buildLabel("Chi tiết"),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(child: _buildTextField(_newNamHocCtrl, "Năm học", Icons.calendar_month, primaryColor)),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildTextField(_newMaxMembersCtrl, "Sĩ số", Icons.groups_rounded, primaryColor, isNumber: true)),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          
+                          // DATE PICKERS
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F7FA),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: const Color(0xFFEEEFFF)),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _buildCompactDatePicker(context, "Bắt đầu", dateStart, (val) => setStateDialog(() => dateStart = val)),
+                                ),
+                                Container(
+                                  width: 1, 
+                                  height: 40, 
+                                  color: Colors.grey.withOpacity(0.3), 
+                                  margin: const EdgeInsets.symmetric(horizontal: 12)
+                                ),
+                                Expanded(
+                                  child: _buildCompactDatePicker(context, "Kết thúc", dateEnd, (val) => setStateDialog(() => dateEnd = val)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // --- FOOTER BUTTON ---
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (_newClassNameCtrl.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text("Vui lòng nhập tên lớp!"),
+                                backgroundColor: Colors.redAccent,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              )
+                            );
+                            return;
+                          }
+                          Navigator.pop(ctx);
+
+                          // Lấy thông tin user
+                          final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+                          final userData = userDoc.data() ?? {};
+                          final teacherName = userData['fullName'] ?? user.displayName ?? 'Giáo viên';
+                          final teacherId = _teacherId ?? _accountId ?? user.uid;
+
+                          // Lưu vào Firestore
+                          await FirebaseFirestore.instance.collection('classes').add({
+                            'className': _newClassNameCtrl.text.trim(),
+                            'khoaHoc': _newKhoaHocCtrl.text.trim(),
+                            'classCode': _newClassCodeCtrl.text.trim(),
+                            'namHoc': _newNamHocCtrl.text.trim(),
+                            'dateStart': Timestamp.fromDate(dateStart),
+                            'dateEnd': Timestamp.fromDate(dateEnd),
+                            'teacherId': teacherId,
+                            'teacherName': teacherName,
+                            'allowJoin': true,
+                            'memberCount': 0,
+                            'maxMembers': int.tryParse(_newMaxMembersCtrl.text) ?? 50,
+                            'createdAt': FieldValue.serverTimestamp(),
+                            'lopId': DateTime.now().millisecondsSinceEpoch.toString(),
+                          });
+
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("🎉 Tạo lớp thành công!"), backgroundColor: Color(0xFF43A047)),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primaryColor,
+                          foregroundColor: Colors.white,
+                          elevation: 8,
+                          shadowColor: primaryColor.withOpacity(0.4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: const Text(
+                          "Hoàn tất & Tạo lớp",
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // --- CÁC WIDGET CON HỖ TRỢ GIAO DIỆN MỚI ---
+
+  Widget _buildLabel(String text) {
+    return Text(
+      text.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        color: Color(0xFF9CA3AF), // Màu xám nhạt
+        letterSpacing: 1.0,
+      ),
+    );
+  }
+
+  Widget _buildTextField(TextEditingController ctrl, String hint, IconData icon, Color accentColor, {bool isNumber = false, bool isReadOnly = false}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: TextField(
+        controller: ctrl,
+        readOnly: isReadOnly,
+        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+        style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.normal),
+          prefixIcon: Icon(icon, color: accentColor.withOpacity(0.8), size: 22),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
     );
   }
 
-  final docs = snapshot.data!.docs;
-  
-  // ✅ Filter ra những classId hợp lệ
-  final validClassIds = <String>[];
-  for (final doc in docs) {
-    final classId = doc.id;
-    validClassIds.add(classId);
-  }
-
-  // Nếu sau khi filter mà không còn card nào -> hiện thông báo
-  if (validClassIds.isEmpty) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Center(
-        child: Text(
-          isTeacher ? "Bạn chưa dạy lớp nào" : "Bạn chưa tham gia lớp nào",
-          style: TextStyle(
-            color: Colors.grey.shade600,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
-
-  return SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    clipBehavior: Clip.none,
-    child: Row(
-      children: validClassIds.map((classId) {
-        return Padding(
-          padding: const EdgeInsets.only(right: 20),
-          child: CourseCard(
-            classId: classId,
-            iconSrc: "assets/icons/ios.svg",
-            color: const Color(0xFF7553F6),
-          ),
+  Widget _buildCompactDatePicker(BuildContext context, String label, DateTime date, Function(DateTime) onSelect) {
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date,
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+          builder: (context, child) {
+            return Theme(
+              data: Theme.of(context).copyWith(
+                colorScheme: const ColorScheme.light(primary: Color(0xFF6F5DE8)),
+              ),
+              child: child!,
+            );
+          },
         );
-      }).toList(),
-    ),
-  );
-}
+        if (picked != null) onSelect(picked);
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text(
+                DateFormat('dd/MM/yyyy').format(date),
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF374151), fontSize: 14),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.grey),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }

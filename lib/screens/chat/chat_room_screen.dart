@@ -49,9 +49,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _controller.clear();
       Future.delayed(const Duration(milliseconds: 100), () {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
+        0.0, 
+        duration: const Duration(milliseconds: 300), 
+        curve: Curves.easeOut
       );
     });
   }
@@ -97,7 +97,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     final isMe = data['senderId'] == user.uid;
                     final text = data['text'] ?? '';
                     final ts = data['createdAt'] as Timestamp?;
-                    final time = ts != null ? DateFormat('HH:mm dd/MM').format(ts.toDate()) : '';
+                    final dateTime = ts != null ? ts.toDate() : DateTime.now(); 
+                    final time = DateFormat('HH:mm').format(dateTime);
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
