@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+// Các import model giữ nguyên theo cấu trúc của bạn
 import 'model/class_management_screen.dart';
 import 'model/student_management_screen.dart';
 import 'model/teacher_management_screen.dart';
-
-
+// Import service thông báo (kiểm tra lại đường dẫn nếu cần)
+import 'package:baocaocuoiky/services/notification_service.dart';
+import 'model/notification_management_screen.dart'; 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({Key? key}) : super(key: key);
 
@@ -58,6 +60,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
             ),
             const SizedBox(height: 16),
+            
             // Card Quản Lý Học Sinh
             _buildManagementCard(
               context,
@@ -75,6 +78,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
             ),
             const SizedBox(height: 16),
+            
             // Card Quản Lý Giáo Viên
             _buildManagementCard(
               context,
@@ -88,6 +92,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   MaterialPageRoute(
                     builder: (context) => const TeacherManagementScreen(),
                   ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // --- [MỚI] Card Tạo Thông Báo ---
+           _buildManagementCard(
+              context,
+              title: "Quản Lý Thông Báo", // Đổi tên
+              subtitle: "Đăng tin tức, lịch thi, sự kiện",
+              icon: Icons.campaign_rounded,
+              color: const Color(0xFF16A34A), // Xanh lá
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const NotificationManagementScreen()),
                 );
               },
             ),
@@ -128,7 +148,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           child: Row(
             children: [
-              // Icon với background
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -138,7 +157,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 child: Icon(icon, color: color, size: 32),
               ),
               const SizedBox(width: 16),
-              // Text và arrow
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -169,6 +187,45 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+
+  // --- WIDGETS HỖ TRỢ ---
+  Widget _buildLabel(String text) {
+    return Text(
+      text.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        color: Color(0xFF9CA3AF),
+        letterSpacing: 0.8,
+      ),
+    );
+  }
+
+  Widget _buildTextField(TextEditingController ctrl, String hint, IconData icon, Color accentColor, {int maxLines = 1}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: TextField(
+        controller: ctrl,
+        maxLines: maxLines,
+        style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.normal),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Icon(icon, color: accentColor.withOpacity(0.8), size: 22),
+          ),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
     );

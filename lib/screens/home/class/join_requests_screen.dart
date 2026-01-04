@@ -96,13 +96,35 @@ class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Duyệt yêu cầu • ${widget.className}'),
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: const Color(0xFFF5F7FB),
+    appBar: AppBar(
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.group_add, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Duyệt yêu cầu • ${widget.className}',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
-      body: StreamBuilder<DocumentSnapshot>(
+      backgroundColor: const Color(0xFF6C63FF),
+      foregroundColor: Colors.white,
+      elevation: 2,
+    ),
+    body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance.collection('classes').doc(widget.classId).snapshots(),
         builder: (context, classSnap) {
           if (classSnap.hasError) {

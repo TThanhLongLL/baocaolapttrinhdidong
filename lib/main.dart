@@ -3,26 +3,28 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:baocaocuoiky/screens/onboding/onboding_screen.dart';
 import 'package:baocaocuoiky/screens/chat/chat_screen.dart';
 import 'firebase_options.dart';
+import 'package:baocaocuoiky/services/local_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Dùng try-catch để bao bọc việc khởi tạo Firebase
+  // 1. Khởi tạo Firebase
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
     print("Khởi tạo Firebase thành công!");
   } catch (e) {
-    // Nếu có lỗi (ví dụ: đã khởi tạo rồi), chỉ in ra và BỎ QUA để app chạy tiếp
     print("Lỗi khởi tạo Firebase (có thể bỏ qua): $e");
   }
 
-  // Quan trọng nhất: Dòng này PHẢI được chạy thì mới hết màn hình trắng
+  // 2. [QUAN TRỌNG] Khởi tạo Local Notification
+  // Dòng này giúp đăng ký kênh thông báo với hệ thống Android/iOS
+  await LocalNotificationService().init();
+
+  // 3. Chạy ứng dụng
   runApp(const MyApp());
 }
-
-
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

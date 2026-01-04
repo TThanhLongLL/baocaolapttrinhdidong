@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart'; // [MỚI] Thêm thư viện này để format ngày
-
+import 'package:intl/intl.dart';
 import 'components/course_card.dart';
 import 'components/secondary_course_card.dart';
+import '../../services/notification_service.dart';
+import '../../services/local_notification_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -22,19 +23,160 @@ class _HomePageState extends State<HomePage> {
   String? _teacherId;
   bool _joinExpanded = false;
   
-  // Các controller cho việc tạo lớp
+  // Controller tạo lớp
   final TextEditingController _newClassNameCtrl = TextEditingController();
   final TextEditingController _newClassCodeCtrl = TextEditingController();
-  final TextEditingController _newKhoaHocCtrl = TextEditingController(); // [MỚI]
-  final TextEditingController _newNamHocCtrl = TextEditingController(); // [MỚI]
-  final TextEditingController _newMaxMembersCtrl = TextEditingController(); // [MỚI]
+  final TextEditingController _newKhoaHocCtrl = TextEditingController();
+  final TextEditingController _newNamHocCtrl = TextEditingController();
+  final TextEditingController _newMaxMembersCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadRole();
+    
+    // Khởi tạo và báo luôn
+    LocalNotificationService().init().then((_) {
+      print("🔔 Service Init Xong -> Bắt đầu quét dữ liệu...");
+      _checkAndNotifyImmediately(); 
+      _checkAssignmentsAndNotify();
+    });
   }
 
+  // --- LOGIC MỚI: QUÉT VÀ BÁO NGAY ---
+  Future<void> _checkAndNotifyImmediately() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final now = DateTime.now();
+    
+    // 1. Lấy danh sách lớp đã tham gia
+    final enrolledQuery = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('enrolledClasses').get();
+    final classIds = enrolledQuery.docs.map((e) => e.id).toList();
+
+    if (classIds.isEmpty) return;
+
+    // 2. Tìm lịch học NGÀY MAI
+    final tomorrow = now.add(const Duration(days: 1));
+    final startOfTomorrow = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
+    final endOfTomorrow = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 59, 59);
+    
+    int lessonCount = 0;
+    String firstLessonTopic = "";
+
+    for (String classId in classIds) {
+      final lessons = await FirebaseFirestore.instance
+          .collection('classes').doc(classId).collection('lessons')
+          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfTomorrow))
+          .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endOfTomorrow))
+          .get();
+      
+      if (lessons.docs.isNotEmpty) {
+        lessonCount += lessons.docs.length;
+        if (firstLessonTopic.isEmpty) {
+          firstLessonTopic = lessons.docs.first.data()['topic'] ?? "Buổi học";
+        }
+      }
+    }
+
+    // NẾU CÓ LỊCH -> BẮN THÔNG BÁO NGAY
+    if (lessonCount > 0) {
+      await LocalNotificationService().showInstantNotification(
+        id: 1001,
+        title: "📅 Lịch học ngày mai",
+        body: "Bạn có $lessonCount buổi học ngày mai (VD: $firstLessonTopic). Chuẩn bị nhé!",
+      );
+    }
+
+    // 3. Tìm bài tập sắp hết hạn (trong 24h tới)
+    int assignmentCount = 0;
+    final deadlineThreshold = now.add(const Duration(hours: 24));
+    
+    for (String classId in classIds) {
+      final assignments = await FirebaseFirestore.instance
+          .collection('classes').doc(classId).collection('posts')
+          .where('type', isEqualTo: 'assignment')
+          .where('deadline', isGreaterThan: Timestamp.fromDate(now))
+          .where('deadline', isLessThan: Timestamp.fromDate(deadlineThreshold))
+          .get();
+      assignmentCount += assignments.docs.length;
+    }
+
+    // NẾU CÓ BÀI TẬP -> BẮN THÔNG BÁO NGAY
+    if (assignmentCount > 0) {
+       await LocalNotificationService().showInstantNotification(
+        id: 2002,
+        title: "⏰ Deadline sắp đến!",
+        body: "Bạn có $assignmentCount bài tập cần nộp trong 24h tới. Đừng quên nhé!",
+      );
+    }
+  }
+  // --- HÀM MỚI: QUÉT VÀ THÔNG BÁO BÀI TẬP ---
+Future<void> _checkAssignmentsAndNotify() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+
+  final now = DateTime.now();
+  // Ngưỡng thời gian: Kiểm tra bài tập hết hạn trong 24 giờ tới
+  final deadlineThreshold = now.add(const Duration(hours: 24));
+
+  try {
+    // 1. Lấy danh sách lớp đã tham gia
+    final enrolledQuery = await FirebaseFirestore.instance
+        .collection('users').doc(user.uid).collection('enrolledClasses').get();
+    
+    final classIds = enrolledQuery.docs.map((e) => e.id).toList();
+
+    if (classIds.isEmpty) return;
+
+    int assignmentCount = 0;
+    String firstAssignmentTitle = "";
+
+    // 2. Duyệt qua từng lớp để tìm bài tập
+    for (String classId in classIds) {
+      // Lấy các bài post là 'assignment' và có deadline chưa qua
+      final assignments = await FirebaseFirestore.instance
+          .collection('classes').doc(classId).collection('posts')
+          .where('type', isEqualTo: 'assignment') // Chỉ lấy bài tập
+          .where('deadline', isGreaterThan: Timestamp.fromDate(now)) // Chưa hết hạn
+          .where('deadline', isLessThan: Timestamp.fromDate(deadlineThreshold)) // Sắp hết hạn (trong 24h)
+          .get();
+
+      if (assignments.docs.isNotEmpty) {
+        assignmentCount += assignments.docs.length;
+        // Lấy tên bài đầu tiên để hiện trong thông báo cho cụ thể
+        if (firstAssignmentTitle.isEmpty) {
+          final data = assignments.docs.first.data();
+          firstAssignmentTitle = data['title'] ?? "Bài tập mới";
+        }
+      }
+    }
+
+    // 3. Nếu có bài tập sắp hết hạn -> BẮN THÔNG BÁO
+    if (assignmentCount > 0) {
+      String bodyText = "";
+      if (assignmentCount == 1) {
+        bodyText = "Bạn có bài tập \"$firstAssignmentTitle\" sắp hết hạn. Nộp ngay kẻo muộn!";
+      } else {
+        bodyText = "Gấp! Bạn có $assignmentCount bài tập sắp hết hạn trong 24h tới (VD: $firstAssignmentTitle).";
+      }
+
+      await LocalNotificationService().showInstantNotification(
+        id: 2024, // ID khác với lịch học để không bị đè
+        title: "⏰ Nhắc nhở bài tập",
+        body: bodyText,
+      );
+    } else {
+      print("✅ Không có bài tập nào sắp hết hạn trong 24h tới.");
+    }
+
+  } catch (e) {
+    print("❌ Lỗi quét bài tập: $e");
+  }
+}
+
+  // ... (Giữ nguyên các hàm _loadRole, _requestJoin, dispose...)
   @override
   void dispose() {
     _newClassNameCtrl.dispose();
@@ -47,7 +189,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadRole() async {
-    final user = FirebaseAuth.instance.currentUser;
+     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
@@ -55,7 +197,6 @@ class _HomePageState extends State<HomePage> {
 
     String role = data['role'] ?? 'student';
     String? accountId = data['accountId'] as String?;
-
     String? foundTeacherId = (data['teacherId'] ?? data['giaoVienId']) as String?;
 
     if ((role == 'teacher' || role == 'admin') && foundTeacherId == null) {
@@ -84,17 +225,16 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (!mounted) return;
-
     setState(() {
       _role = role;
       _accountId = accountId;
       _teacherId = foundTeacherId;
     });
   }
-
+  
   Future<void> _requestJoin(BuildContext context) async {
-    // ... (Giữ nguyên logic tham gia lớp của học sinh)
-    final code = _codeCtrl.text.trim();
+      // ... (Copy lại code cũ của bạn vào đây) ...
+      final code = _codeCtrl.text.trim();
     if (code.isEmpty) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -149,6 +289,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ... (Phần UI build giữ nguyên, CHỈ SỬA NÚT TEST) ...
+
   @override
   Widget build(BuildContext context) {
     final bool isTeacher = _role == 'teacher' || _role == 'admin';
@@ -161,7 +303,7 @@ class _HomePageState extends State<HomePage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 80, 20, 100),
           children: [
-            // --- HEADER ---
+            // --- HEADER (Giữ nguyên) ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -189,10 +331,11 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 30),
 
-            // --- PHẦN 1: NHẬP MÃ (Chỉ cho Sinh viên) ---
+            // --- PHẦN 1: NHẬP MÃ (SỬA NÚT TEST Ở ĐÂY) ---
             if (!isTeacher) ...[
               Container(
-                padding: const EdgeInsets.all(16),
+                // ... (Code giao diện nhập mã giữ nguyên) ...
+                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
@@ -273,9 +416,11 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const SizedBox(height: 30),
+              
             ],
 
-            // --- PHẦN 2: DANH SÁCH LỚP HỌC ---
+            // ... (Phần còn lại giữ nguyên: Danh sách lớp, Thông báo...) ...
+             // --- PHẦN 2: DANH SÁCH LỚP HỌC ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -285,7 +430,6 @@ class _HomePageState extends State<HomePage> {
                 ),
                 if (isTeacher)
                   TextButton.icon(
-                    // [MỚI] Gọi hàm tạo lớp nâng cao
                     onPressed: () => _showCreateClassDialog(context),
                     icon: const Icon(Icons.add_circle_outline, size: 18),
                     label: const Text("Tạo lớp"),
@@ -294,7 +438,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 16),
 
-            // --- STREAM BUILDER ---
+            // STREAM BUILDER LỚP HỌC
             isTeacher
                 ? StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -321,8 +465,10 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937)),
             ),
             const SizedBox(height: 16),
+            
+            // --- STREAM THÔNG BÁO ---
             StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('notifications').snapshots(),
+              stream: NotificationService.instance.streamAllNotifications(), 
               builder: (context, snapshot) {
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return Container(
@@ -332,9 +478,27 @@ class _HomePageState extends State<HomePage> {
                     child: const Text("Không có thông báo mới", style: TextStyle(color: Colors.grey)),
                   );
                 }
-                final notifications = snapshot.data!.docs;
+                
+                final now = DateTime.now();
+                // Lọc thông báo chưa hết hạn
+                final activeNotifications = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  if (data['expirationDate'] == null) return true;
+                  final expire = (data['expirationDate'] as Timestamp).toDate();
+                  return expire.isAfter(now);
+                }).toList();
+
+                if (activeNotifications.isEmpty) {
+                   return Container(
+                    padding: const EdgeInsets.all(20),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                    child: const Text("Không có thông báo mới", style: TextStyle(color: Colors.grey)),
+                  );
+                }
+
                 return Column(
-                  children: notifications.map((doc) {
+                  children: activeNotifications.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
                     Color cardColor = const Color(0xFF80A4FF);
                     if (data['color'] != null) cardColor = Color(data['color']);
@@ -357,7 +521,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildClassList(AsyncSnapshot<QuerySnapshot> snapshot, {required bool isTeacher}) {
+  // ... (Giữ nguyên các hàm _buildClassList, _showCreateClassDialog, _buildTextField...)
+   Widget _buildClassList(AsyncSnapshot<QuerySnapshot> snapshot, {required bool isTeacher}) {
     if (snapshot.connectionState == ConnectionState.waiting) {
       return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()));
     }
@@ -418,13 +583,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- [MỚI] TẠO LỚP ĐẦY ĐỦ CHO GIÁO VIÊN ---
- // --- GIAO DIỆN TẠO LỚP MỚI (ĐẸP & HIỆN ĐẠI) ---
   Future<void> _showCreateClassDialog(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // 1. Khởi tạo giá trị mặc định
     _newClassNameCtrl.clear();
     _newKhoaHocCtrl.clear();
     _newClassCodeCtrl.text = "CL-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}";
@@ -432,20 +594,19 @@ class _HomePageState extends State<HomePage> {
     _newMaxMembersCtrl.text = "50";
 
     DateTime dateStart = DateTime.now();
-    DateTime dateEnd = DateTime.now().add(const Duration(days: 30 * 4)); // Mặc định 4 tháng
+    DateTime dateEnd = DateTime.now().add(const Duration(days: 30 * 4));
 
-    // Màu chủ đạo
-    const Color primaryColor = Color(0xFF6F5DE8); // Tím xanh hiện đại
+    const Color primaryColor = Color(0xFF6F5DE8);
     const Color secondaryColor = Color(0xFF8B80F8); 
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Bắt buộc bấm nút mới đóng
+      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
           return Dialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            backgroundColor: Colors.transparent, // Để hiển thị bo góc mượt mà
+            backgroundColor: Colors.transparent,
             elevation: 0,
             child: Container(
               decoration: BoxDecoration(
@@ -462,7 +623,6 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // --- HEADER ---
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
                     decoration: const BoxDecoration(
@@ -505,10 +665,10 @@ class _HomePageState extends State<HomePage> {
                           constraints: const BoxConstraints(),
                         ),
                       ],
+
                     ),
                   ),
 
-                  // --- BODY (SCROLLABLE) ---
                   Flexible(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(24),
@@ -535,7 +695,6 @@ class _HomePageState extends State<HomePage> {
                           ),
                           const SizedBox(height: 16),
                           
-                          // DATE PICKERS
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -565,7 +724,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
 
-                  // --- FOOTER BUTTON ---
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                     child: SizedBox(
@@ -586,13 +744,11 @@ class _HomePageState extends State<HomePage> {
                           }
                           Navigator.pop(ctx);
 
-                          // Lấy thông tin user
                           final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
                           final userData = userDoc.data() ?? {};
                           final teacherName = userData['fullName'] ?? user.displayName ?? 'Giáo viên';
                           final teacherId = _teacherId ?? _accountId ?? user.uid;
 
-                          // Lưu vào Firestore
                           await FirebaseFirestore.instance.collection('classes').add({
                             'className': _newClassNameCtrl.text.trim(),
                             'khoaHoc': _newKhoaHocCtrl.text.trim(),
@@ -638,15 +794,13 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- CÁC WIDGET CON HỖ TRỢ GIAO DIỆN MỚI ---
-
   Widget _buildLabel(String text) {
     return Text(
       text.toUpperCase(),
       style: const TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF9CA3AF), // Màu xám nhạt
+        color: Color(0xFF9CA3AF),
         letterSpacing: 1.0,
       ),
     );

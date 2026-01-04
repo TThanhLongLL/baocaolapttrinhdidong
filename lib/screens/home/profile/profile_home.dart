@@ -9,6 +9,32 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:typed_data';
 
+class AssignmentItem {
+  final String id;
+  final String title;
+  final DateTime? deadline;
+  final bool submitted;
+
+  AssignmentItem({
+    required this.id,
+    required this.title,
+    this.deadline,
+    required this.submitted,
+  });
+}
+
+class ClassAssignmentData {
+  final String classId;
+  final String className;
+  final List<AssignmentItem> assignments;
+
+  ClassAssignmentData({
+    required this.classId,
+    required this.className,
+    required this.assignments,
+  });
+}
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
@@ -27,8 +53,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   String userName = "Đang tải...";
   String userEmail = "Đang tải...";
   String userAvatar = "https://ui-avatars.com/api/?name=User&background=random";
+  String? userAccountId;
   List<String> userClasses = [];
   List<String> userClassIds = [];
+  Map<String, String> classNameById = {};
+  List<ClassAssignmentData> classAssignments = [];
+  bool isLoadingAssignments = false;
   List<Map<String, dynamic>> upcomingLessons = [];
   @override
   void initState() {
@@ -83,6 +113,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             userName = name;
             userEmail = data['email'] ?? user.email ?? 'Email';
             userAvatar = imgLink;
+            userAccountId = data['accountId'] as String?;
           });
           await _loadUserClasses(data);
           await _loadUpcomingLessons();
@@ -162,10 +193,94 @@ class _ProfileScreenState extends State<ProfileScreen>
         setState(() {
           userClasses = classes;
           userClassIds = classIds;
+          final map = <String, String>{};
+          for (int i = 0; i < classIds.length; i++) {
+            map[classIds[i]] = i < classes.length ? classes[i] : classIds[i];
+          }
+          classNameById = map;
         });
       }
+
+      await _loadClassAssignments();
     } catch (e) {
       print("Lỗi tải lớp học: $e");
+    }
+  }
+
+  Future<void> _loadClassAssignments() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      if (mounted) {
+        setState(() => isLoadingAssignments = true);
+      }
+
+      if (userClassIds.isEmpty) {
+        if (mounted) {
+          setState(() {
+            classAssignments = [];
+            isLoadingAssignments = false;
+          });
+          addAllListData();
+        }
+        return;
+      }
+
+      final String submissionId = userAccountId ?? user.uid;
+      final List<ClassAssignmentData> fetchedClasses = [];
+
+      for (final classId in userClassIds) {
+        final postsSnap = await FirebaseFirestore.instance
+            .collection('classes')
+            .doc(classId)
+            .collection('posts')
+            .where('type', isEqualTo: 'assignment')
+            .orderBy('deadline', descending: false)
+            .get();
+
+        final assignments = <AssignmentItem>[];
+        for (final doc in postsSnap.docs) {
+          final data = doc.data();
+          final Timestamp? deadlineTs =
+              data['deadline'] is Timestamp ? data['deadline'] as Timestamp : null;
+          final submissionSnap =
+              await doc.reference.collection('submissions').doc(submissionId).get();
+          final bool submitted =
+              submissionSnap.exists && (submissionSnap.data()?['status'] ?? 'submitted') != 'cancelled';
+
+          assignments.add(
+            AssignmentItem(
+              id: doc.id,
+              title: (data['title'] ?? 'Bai tap').toString(),
+              deadline: deadlineTs?.toDate(),
+              submitted: submitted,
+            ),
+          );
+        }
+
+        fetchedClasses.add(
+          ClassAssignmentData(
+            classId: classId,
+            className: classNameById[classId] ?? 'Lop hoc',
+            assignments: assignments,
+          ),
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          classAssignments = fetchedClasses;
+          isLoadingAssignments = false;
+        });
+        addAllListData();
+      }
+    } catch (e) {
+      print("L ¯-i t §œi bÇÿi t §ðp: $e");
+      if (mounted) {
+        setState(() => isLoadingAssignments = false);
+        addAllListData();
+      }
     }
   }
 
@@ -274,11 +389,13 @@ Future<void> _loadUpcomingLessons() async {
             parent: animationController,
             curve: const Interval((1 / count) * 2, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: animationController,
-        className: userClasses.isNotEmpty ? userClasses.join(", ") : "Chưa có lớp",
+        classAssignments: classAssignments,
+        isLoadingAssignments: isLoadingAssignments,
+        className: userClasses.isNotEmpty ? userClasses.join(", ") : "Chua co lop",
       ),
     );
 
-    listViews.add(
+listViews.add(
       Padding(
         padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 8),
         child: Text(
@@ -877,12 +994,16 @@ class ClassSubjectView extends StatefulWidget {
   final AnimationController animationController;
   final Animation<double> animation;
   final String className;
+  final List<ClassAssignmentData> classAssignments;
+  final bool isLoadingAssignments;
 
   const ClassSubjectView({
     Key? key,
     required this.animationController,
     required this.animation,
     required this.className,
+    required this.classAssignments,
+    required this.isLoadingAssignments,
   }) : super(key: key);
 
   @override
@@ -949,7 +1070,7 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
                                   ),
                                   const SizedBox(height: 4),
                                   const Text(
-                                    "Xem chi tiết lớp học",
+                                    "Xem chi tiet lop hoc",
                                     style: TextStyle(color: AppTheme.grey, fontSize: 12),
                                   ),
                                 ],
@@ -969,9 +1090,7 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
                           children: [
                             const Divider(height: 1),
                             const SizedBox(height: 10),
-                            _buildExerciseItem("Bài tập 1: Thiết kế UI", "Đã nộp", Colors.green),
-                            _buildExerciseItem("Bài tập 2: Animation Flutter", "Quá hạn", Colors.redAccent),
-                            _buildExerciseItem("Bài tập 3: Tích hợp API", "Hạn: 25/5", Colors.orange),
+                            _buildAssignmentsContent(),
                           ],
                         ),
                       ),
@@ -988,7 +1107,64 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
     );
   }
 
-  Widget _buildExerciseItem(String title, String status, Color statusColor) {
+  Widget _buildAssignmentsContent() {
+    if (widget.isLoadingAssignments) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12.0),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
+      );
+    }
+
+    if (widget.classAssignments.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8.0),
+        child: Text(
+          "Chua co bai tap de hien thi",
+          style: TextStyle(color: AppTheme.grey),
+        ),
+      );
+    }
+
+    return Column(
+      children: widget.classAssignments.map((classData) => _buildClassAssignments(classData)).toList(),
+    );
+  }
+
+  Widget _buildClassAssignments(ClassAssignmentData classData) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.folder_special, size: 18, color: AppTheme.nearlyDarkBlue),
+              const SizedBox(width: 8),
+              Text(
+                classData.className,
+                style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.darkerText),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (classData.assignments.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(left: 4.0),
+              child: Text("Chua co bai tap moi", style: TextStyle(color: AppTheme.grey)),
+            )
+          else
+            Column(
+              children: classData.assignments
+                  .map((assignment) => _buildExerciseItem(assignment))
+                  .toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExerciseItem(AssignmentItem assignment) {
+    final _AssignmentStatus status = _getStatus(assignment);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
@@ -998,24 +1174,48 @@ class _ClassSubjectViewState extends State<ClassSubjectView> {
             children: [
               const Icon(Icons.assignment_outlined, size: 20, color: AppTheme.grey),
               const SizedBox(width: 12),
-              Text(title, style: const TextStyle(color: AppTheme.darkerText, fontWeight: FontWeight.w500)),
+              Text(assignment.title,
+                  style: const TextStyle(color: AppTheme.darkerText, fontWeight: FontWeight.w500)),
             ],
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.1),
+              color: status.color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              status,
-              style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold),
+              status.label,
+              style: TextStyle(color: status.color, fontSize: 12, fontWeight: FontWeight.bold),
             ),
           )
         ],
       ),
     );
   }
+
+  _AssignmentStatus _getStatus(AssignmentItem assignment) {
+    final now = DateTime.now();
+    if (assignment.submitted) {
+      return _AssignmentStatus("Da nop", Colors.green);
+    }
+    if (assignment.deadline != null) {
+      if (assignment.deadline!.isBefore(now)) {
+        return _AssignmentStatus("Qua han", Colors.redAccent);
+      }
+      final deadline = assignment.deadline!;
+      final deadlineText = "Han: ${deadline.day}/${deadline.month}";
+      return _AssignmentStatus(deadlineText, Colors.orange);
+    }
+    return _AssignmentStatus("Chua nop", Colors.grey);
+  }
+}
+
+class _AssignmentStatus {
+  final String label;
+  final Color color;
+
+  _AssignmentStatus(this.label, this.color);
 }
 
 class ScheduleCalendarView extends StatelessWidget {
@@ -1104,31 +1304,53 @@ class ScheduleCalendarView extends StatelessWidget {
                           if (index < firstWeekday - 1) {
                             return const SizedBox.shrink();
                           }
-                          int day = index - firstWeekday + 2;  // 🔧 Sửa dòng này
-                          final isToday = day == now.day;  // 🔧 Cũng sửa dòng này
+                          int day = index - firstWeekday + 2;
+                          final isToday = day == now.day && now.month == now.month; // Đảm bảo check đúng ngày hôm nay
                           final events = eventsByDay[day] ?? [];
+                          
                           final hasLesson = events.any((e) => (e['type'] ?? 'lesson') == 'lesson');
                           final hasDeadline = events.any((e) => (e['type'] ?? 'lesson') == 'assignment');
 
+                          // --- BẮT ĐẦU SỬA TỪ ĐÂY ---
                           Color? bgColor;
+                          Gradient? bgGradient; // Thêm biến Gradient
                           Color textColor = AppTheme.darkerText;
                           BoxBorder? border;
 
-                          if (hasDeadline) {
+                          if (hasDeadline && hasLesson) {
+                            // 1. TRƯỜNG HỢP CẢ HAI: Dùng Gradient pha màu Xanh - Đỏ
+                            bgGradient = const LinearGradient(
+                              colors: [AppTheme.nearlyDarkBlue, Colors.redAccent],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            );
+                            textColor = Colors.white;
+                          } else if (hasDeadline) {
+                            // 2. Chỉ có Deadline -> Đỏ
                             bgColor = Colors.redAccent;
                             textColor = Colors.white;
                           } else if (hasLesson) {
+                            // 3. Chỉ có Lịch học -> Xanh
                             bgColor = AppTheme.nearlyDarkBlue;
                             textColor = Colors.white;
-                          } else if (isToday) {
-                            border = Border.all(color: AppTheme.nearlyBlue, width: 2);
-                            textColor = AppTheme.nearlyBlue;
+                          } 
+                          
+                          // Xử lý viền cho ngày hiện tại (nếu chưa có màu nền thì mới hiện viền rõ)
+                          if (isToday) {
+                            if (bgColor == null && bgGradient == null) {
+                              border = Border.all(color: AppTheme.nearlyBlue, width: 2);
+                              textColor = AppTheme.nearlyBlue;
+                            } else {
+                              // Nếu hôm nay có sự kiện, thêm viền trắng hoặc vàng để làm nổi bật hơn
+                              border = Border.all(color: Colors.amber, width: 2); 
+                            }
                           }
 
                           return Container(
                             margin: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: bgColor ?? Colors.transparent,
+                              color: bgColor,       // Màu đơn
+                              gradient: bgGradient, // Màu chuyển sắc (nếu có cả 2)
                               shape: BoxShape.circle,
                               border: border,
                             ),
@@ -1138,7 +1360,9 @@ class ScheduleCalendarView extends StatelessWidget {
                                 style: TextStyle(
                                     color: textColor,
                                     fontSize: 13,
-                                    fontWeight: (bgColor != null || isToday) ? FontWeight.bold : FontWeight.normal
+                                    fontWeight: (bgColor != null || bgGradient != null || isToday) 
+                                        ? FontWeight.bold 
+                                        : FontWeight.normal
                                 ),
                               ),
                             ),
@@ -1158,13 +1382,24 @@ class ScheduleCalendarView extends StatelessWidget {
                             Row(children: const [
                               CircleAvatar(radius: 4, backgroundColor: AppTheme.nearlyDarkBlue),
                               SizedBox(width: 6),
-                              Text("lịch học", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))
+                              Text("Lịch học", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)) // Giảm font xíu cho vừa
                             ]),
-                            Container(width: 1, height: 16, color: Colors.grey.withOpacity(0.4)),
+                            // Thêm chú thích cho trường hợp trùng
+                            Row(children: [
+                              Container(
+                                width: 8, height: 8,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(colors: [AppTheme.nearlyDarkBlue, Colors.redAccent])
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text("Cả hai", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))
+                            ]),
                             Row(children: const [
                               CircleAvatar(radius: 4, backgroundColor: Colors.redAccent),
                               SizedBox(width: 6),
-                              Text("Hạn nộp", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))
+                              Text("Hạn nộp", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))
                             ]),
                           ],
                         ),
